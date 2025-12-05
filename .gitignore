@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Python / builds
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Envs
+.venv/
+venv/
+.env
+.envrc
+
+# Streamlit (evita vazar secrets)
+
+# (Se quiser versionar apenas um config modelo, depois crie .streamlit/config.example.toml)
+
+# Dados e arquivos grandes
+arquivos_teste/
+*.xlsx
+
+# Logs temporários
+*.log

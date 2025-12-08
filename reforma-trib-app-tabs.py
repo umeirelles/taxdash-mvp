@@ -1296,39 +1296,88 @@ with st.sidebar:
 if selected_area == "Área 1: Importar Arquivos SPED":
 
     st.header(":material/database_upload: Importar Arquivos SPED", divider='red')
+
+    # Welcome section
+    st.markdown("""
+    ### Bem-vindo ao TaxDash
+    Sistema de análise de dados fiscais SPED para suporte à Reforma Tributária brasileira.
+    """)
     st.markdown('##')
 
-    col1, col2 = st.columns([1, 1])
-    
+    col1, col2 = st.columns([3, 2])
+
+    with col2:
+        # Information panel
+        st.markdown("### :material/info: Informações")
+
+        st.info("""
+        **Arquivos obrigatórios:**
+        - SPED Contribuições
+        - SPED Fiscal
+
+        **Arquivo opcional:**
+        - ECD (Escrituração Contábil)
+        """)
+
+        st.markdown("---")
+
+        st.markdown("### :material/analytics: O que você pode fazer")
+        st.markdown("""
+        - Análise de compras e vendas
+        - Cálculo de créditos PIS/COFINS
+        - Simulação da Reforma Tributária
+        - Análise de operações por CFOP/NCM
+        - Relatórios por estabelecimento e UF
+        """)
+
     with col1:
-    
-        st.subheader("ECD")
-        uploaded_sped_ecd_file = st.file_uploader(
-            label="*Selecione um ou mais arquivos ECD*",
-            type="txt",
-            accept_multiple_files=True
-        )
-        st.markdown('###')
-    
-        st.subheader("SPED Contribuições")
-        uploaded_contrib_file = st.file_uploader(
-            label="*Selecione um ou mais arquivos SPED Contribuições*",
-            type="txt",
-            accept_multiple_files=True
-        )
+        # ECD Section
+        with st.container():
+            st.markdown("### :material/account_balance: ECD - Escrituração Contábil Digital")
+            uploaded_sped_ecd_file = st.file_uploader(
+                label="Selecione um ou mais arquivos ECD",
+                type="txt",
+                accept_multiple_files=True,
+                help="Arquivos ECD em formato .txt",
+                key="ecd_uploader"
+            )
+            if uploaded_sped_ecd_file:
+                st.success(f"✓ {len(uploaded_sped_ecd_file)} arquivo(s) selecionado(s)")
+
         st.markdown('###')
 
-        st.subheader("SPED Fiscal")
-        uploaded_sped_fiscal_files = st.file_uploader(
-            label="*Selecione um ou mais arquivos SPED FISCAL (do mesmo período)*",
-            type="txt",
-            accept_multiple_files=True
-        )
+        # SPED Contribuições Section
+        with st.container():
+            st.markdown("### :material/receipt_long: SPED Contribuições (PIS/COFINS)")
+            uploaded_contrib_file = st.file_uploader(
+                label="Selecione um ou mais arquivos SPED Contribuições",
+                type="txt",
+                accept_multiple_files=True,
+                help="Arquivos SPED Contribuições (PIS/COFINS) em formato .txt",
+                key="contrib_uploader"
+            )
+            if uploaded_contrib_file:
+                st.success(f"✓ {len(uploaded_contrib_file)} arquivo(s) selecionado(s)")
+
         st.markdown('###')
 
+        # SPED Fiscal Section
+        with st.container():
+            st.markdown("### :material/inventory_2: SPED Fiscal (ICMS/IPI)")
+            uploaded_sped_fiscal_files = st.file_uploader(
+                label="Selecione um ou mais arquivos SPED Fiscal do mesmo período",
+                type="txt",
+                accept_multiple_files=True,
+                help="Arquivos SPED Fiscal (ICMS/IPI) em formato .txt",
+                key="fiscal_uploader"
+            )
+            if uploaded_sped_fiscal_files:
+                st.success(f"✓ {len(uploaded_sped_fiscal_files)} arquivo(s) selecionado(s)")
 
-        if st.button("Processar Arquivos", type='primary'):
-            
+        st.markdown('###')
+
+        if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True):
+
             # -----------------------------------------------------
             # Visual feedback: list selected files + stage progress
             # -----------------------------------------------------

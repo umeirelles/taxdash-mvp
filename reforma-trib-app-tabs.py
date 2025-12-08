@@ -2,11 +2,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from dicts import *
 import csv
 import io
 from taxdash import load_and_process_data, load_and_process_sped_fiscal, load_and_process_ecd
 from taxdash import config, processors
+
+# Import specific items from dicts instead of wildcard import
+from dicts import (
+    tab_4_3_7, tab_4_3_8, tab_4_3_5, cst_pis_cofins, cfop_cod_descr, cod_uf,
+    cst_icms, sped_fiscal_tab_5_3_AM, sped_fiscal_tab_5_1_1, sped_fiscal_tab_5_4,
+    sped_fiscal_cod_receita_AM, sped_fiscal_tab_ind_apur_icms_AM, sped_fiscal_tab_5_2,
+    PLANO_CONTAS_REF, regras_ibs_saidas_zfm, regras_cbs_saidas_zfm
+)
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -49,7 +56,7 @@ def style_df(df):
 
 def base_saidas_reforma(C100_SF, C197_SF, C170_SC):
 
-    C170_SC = C170_SC[C170_SC['ind_oper'] == '1'].copy()
+    C170_SC = C170_SC[C170_SC['ind_oper'] == '1']
 
 
     # ----------------------------------------------------------------
@@ -57,7 +64,7 @@ def base_saidas_reforma(C100_SF, C197_SF, C170_SC):
     # ----------------------------------------------------------------
 
     # Create composite keys and a unique mapping (avoid non-unique index in map)
-    c100_map = C100_SF[["9", "2", "ie_estab"]].copy()
+    c100_map = C100_SF[["9", "2", "ie_estab"]]
     c100_map = c100_map.dropna(subset=["9", "2"])  # ensure tuple is well-formed
     c100_map["key"] = list(zip(c100_map["9"], c100_map["2"]))
     c100_map = c100_map.drop_duplicates(subset=["key"], keep="last")[ ["key", "ie_estab"] ].set_index("key")
@@ -72,7 +79,7 @@ def base_saidas_reforma(C100_SF, C197_SF, C170_SC):
     # ----------------------------------------------------------------
 
     # Create composite keys and a unique mapping for C197 → avoid non-unique index in map
-    c197_map = C197_SF[["chave_nf", "4", "2"]].copy()
+    c197_map = C197_SF[["chave_nf", "4", "2"]]
     c197_map = c197_map.dropna(subset=["chave_nf", "4"])  # ensure tuple is well-formed
     c197_map["key2"] = list(zip(c197_map["chave_nf"], c197_map["4"]))
     c197_map = c197_map.drop_duplicates(subset=["key2"], keep="last")[ ["key2", "2"] ].set_index("key2")
@@ -1416,7 +1423,7 @@ elif selected_area == "Área 5: Reforma Tributária":
             dest = st.session_state["ecd_i355_df"]
             dest_idx = dest.set_index("ROW_KEY", drop=False)
 
-            before = dest_idx["CREDITAVEL"].astype(str).copy()
+            before = dest_idx["CREDITAVEL"].astype(str)  # astype() already creates a copy
             # Align assignment by index; keep existing where not present
             dest_idx.loc[edited_ecd.index, "CREDITAVEL"] = edited_ecd["CREDITAVEL"].astype(str)
 

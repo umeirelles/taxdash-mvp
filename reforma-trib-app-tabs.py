@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from dicts import *
 import csv
 import io
+from taxdash import load_and_process_data, load_and_process_sped_fiscal, load_and_process_ecd
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -13,440 +14,6 @@ pd.set_option('future.no_silent_downcasting', True)
 # Configure Streamlit page
 st.set_page_config(page_title="TaxDash", page_icon=":material/code:", layout="wide")
 
-
-# --------------------------------------------------------------------------------------------------------------------
-# Core Data Loading & Processing
-# --------------------------------------------------------------------------------------------------------------------
-
-
-@st.cache_data
-def load_and_process_data(uploaded_file):
-    """Load one or more SPED Contribuições files and build stable, cross-file unique IDs.
-    Backwards-compatible: accepts a single file or a list of files.
-    """
-    # Validate input
-    if uploaded_file is None or (isinstance(uploaded_file, list) and len(uploaded_file) == 0):
-        st.error("Por favor, carregue pelo menos um arquivo .txt")
-        st.stop()
-
-    DELIMITER = '|'
-    ENCODING = 'latin-1'
-    COLUMN_NAMES = [str(i) for i in range(40)]
-    PARENT_REG_CODES = [
-        "0000", "0140", "A100", "C100", "C180", "C190", "C380", "C400", "C500", "C600", "C800", "D100", "D500",
-        "F100", "F120", "F130", "F150", "F200", "F500", "F600", "F700", "F800", "I100", "M100", "M200",
-        "M300", "M350", "M400", "M500", "M600", "M700", "M800", "P100", "P200", "1010", "1020", "1050",
-        "1100", "1200", "1300", "1500", "1600", "1700", "1800", "1900"
-    ]
-
-    # Normalize to a list for multi-file support
-    files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
-    dfs = []
-
-    for i, f in enumerate(files):
-        # Robust, memory-safe read for SPED Contribuições
-        f.seek(0)
-        reader = pd.read_csv(
-            f,
-            header=None,
-            delimiter=DELIMITER,
-            names=COLUMN_NAMES,
-            encoding=ENCODING,
-            dtype=str,
-            engine="python",
-            on_bad_lines="skip",
-            chunksize=200_000,
-            quoting=csv.QUOTE_NONE
-        )
-        parts = []
-        for chunk in reader:
-            if '1' in chunk.columns:
-                mask_end = chunk['1'].astype(str).eq('9999')
-                if mask_end.any():
-                    first_idx = int(np.argmax(mask_end.to_numpy()))
-                    parts.append(chunk.iloc[:first_idx+1])
-                    break
-            parts.append(chunk)
-        df_temp = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=COLUMN_NAMES)
-        # Post-trim safety: ensure we only keep up to and including first 9999 row
-        if not df_temp.empty and '1' in df_temp.columns:
-            mask_all = df_temp['1'].astype(str).eq('9999')
-            if mask_all.any():
-                cut = int(np.argmax(mask_all.to_numpy()))
-                df_temp = df_temp.iloc[:cut+1].copy()
-        if df_temp.empty:
-            # Skip empty/invalid files quietly
-            continue
-
-        # Extract period and CNPJ for this file (guard on the same columns we read)
-        data_efd = df_temp.loc[0, '7'][2:] if pd.notna(df_temp.loc[0, '7']) else None
-        cnpj_header = df_temp.loc[0, '9'] if pd.notna(df_temp.loc[0, '9']) else None
-
-        # Drop unnecessary column if present
-        if '0' in df_temp.columns:
-            df_temp.drop(columns=['0'], inplace=True)
-
-        # Build deterministic, cross-file row id
-        # id := "<fileidx>|<periodo>|<cnpj>|<row_no_zfilled>"
-        prefix_file = str(i)
-        prefix_periodo = str(data_efd) if data_efd is not None else "NA"
-        prefix_cnpj    = str(cnpj_header) if cnpj_header is not None else "NA"
-        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
-        composite_id = (prefix_file + "|" + prefix_periodo + "|" + prefix_cnpj + "|" + row_no).astype("string")
-
-        # Insert new columns at the front, preserving existing downstream expectations
-        df_temp.insert(0, 'cnpj', None)
-        df_temp.insert(0, 'periodo', data_efd)
-        df_temp.insert(0, 'id_pai', None)
-        df_temp.insert(0, 'id', composite_id)
-
-        # Assign CNPJ values using known record rules, then forward fill within this file only
-        df_temp.loc[df_temp['1'].isin(["0000", "C001", "D001", "M001", "1001"]), 'cnpj'] = cnpj_header
-        df_temp.loc[df_temp['1'] == "0140", 'cnpj'] = df_temp['4']
-        df_temp.loc[df_temp['1'].isin(["A010", "C010", "D010", "F010", "I010", "P010"]), 'cnpj'] = df_temp['2']
-
-        # Parent IDs → id_pai = id on parent records, then forward-fill
-        df_temp.loc[df_temp['1'].isin(PARENT_REG_CODES), 'id_pai'] = df_temp['id']
-        df_temp['id_pai'] = df_temp['id_pai'].ffill()
-        df_temp['cnpj'] = df_temp['cnpj'].ffill()
-
-        dfs.append(df_temp)
-
-    # Concatenate all files
-    df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=COLUMN_NAMES + ['id', 'id_pai', 'periodo', 'cnpj'])
-    if df.empty:
-        st.error("Falha ao ler o SPED Contribuições: nenhum arquivo válido ou todas as linhas foram descartadas como inválidas.")
-        st.stop()
-
-    return df
-
-
-# SPED-FISCAL
-@st.cache_data
-def load_and_process_sped_fiscal(uploaded_files):
-    if not uploaded_files:
-        st.error("Por favor, carregue no mínimo um arquivo .txt")
-        st.stop()
-
-    DELIMITER = '|'
-    ENCODING = 'latin-1'
-    COLUMN_NAMES = [str(i) for i in range(42)]
-    PARENT_REG_CODES = [
-        "0000",
-        "C100", "C300", "C350", "C400", "C495", "C500", "C600", "C700", "C800", "C860",
-        "D100", "D300", "D350", "D400", "D500", "D600", "D695", "D700", "D750",
-        "E100", "E200", "E300", "E500",
-        "G110",
-        "H005",
-        "K100", "K200", "K210", "K220", "K230", "K250", "K260", "K270", "K280", "K290", "K300",
-        "1100", "1200", "1300", "1350", "1390", "1400", "1500", "1600", "1601", "1700", "1800", "1900", "1960", "1970", "1980"
-    ]
-
-    # Collect each SPED Fiscal file into a list, then concatenate
-    dfs = []
-    for i, single_file in enumerate(uploaded_files):
-        # Robust read with fallback: try fast C engine; on parser error, fall back to Python engine with chunking
-        try:
-            single_file.seek(0)
-            df_temp = pd.read_csv(
-                single_file,
-                header=None,
-                delimiter=DELIMITER,
-                names=COLUMN_NAMES,
-                low_memory=False,
-                encoding=ENCODING,
-                dtype=str,
-                engine="c",
-                on_bad_lines="skip"
-            )
-            # Trim at SPED Fiscal end marker 9999 (include the 9999 row)
-            if not df_temp.empty and '1' in df_temp.columns:
-                mask_all = df_temp['1'].astype(str).eq('9999')
-                if mask_all.any():
-                    cut = int(np.argmax(mask_all.to_numpy()))
-                    df_temp = df_temp.iloc[:cut+1].copy()
-        except pd.errors.ParserError:
-            # Fallback for malformed lines / very long fields
-            single_file.seek(0)
-            reader = pd.read_csv(
-                single_file,
-                header=None,
-                delimiter=DELIMITER,
-                names=COLUMN_NAMES,
-                encoding=ENCODING,
-                dtype=str,
-                engine="python",
-                on_bad_lines="skip",
-                chunksize=200_000,
-                quoting=csv.QUOTE_NONE
-            )
-            parts = []
-            for chunk in reader:
-                if '1' in chunk.columns:
-                    mask_end = chunk['1'].astype(str).eq('9999')
-                    if mask_end.any():
-                        first_idx = int(np.argmax(mask_end.to_numpy()))
-                        parts.append(chunk.iloc[:first_idx+1])
-                        break
-                parts.append(chunk)
-            df_temp = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=COLUMN_NAMES)
-        if df_temp.empty:
-            # Skip empty/invalid files quietly
-            continue
-
-        # Extract period and registration identifiers for this file (guard on the same columns we read)
-        data_efd = df_temp.loc[0, '4'][2:] if pd.notna(df_temp.loc[0, '4']) else None
-        cnpj_estab = df_temp.loc[0, '7'] if pd.notna(df_temp.loc[0, '7']) else None
-        ie_estab = df_temp.loc[0, '10'] if pd.notna(df_temp.loc[0, '10']) else None
-        uf_estab = df_temp.loc[0, '9'] if pd.notna(df_temp.loc[0, '9']) else None
-
-        # Drop the '0' column if it exists
-        if '0' in df_temp.columns:
-            df_temp.drop(columns=['0'], inplace=True)
-
-        # ----- Build a deterministic, cross-file row id
-        # id := "<fileidx>|<periodo>|<cnpj_estab>|<row_no_zfilled>"
-        prefix_file = str(i)
-        prefix_periodo = str(data_efd) if data_efd is not None else "NA"
-        prefix_cnpj    = str(cnpj_estab) if cnpj_estab is not None else "NA"
-        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
-        composite_id = (prefix_file + "|" + prefix_periodo + "|" + prefix_cnpj + "|" + row_no).astype("string")
-
-        # Insert the new columns (keep prior order expectations)
-        df_temp.insert(0, 'uf_estab', uf_estab)
-        df_temp.insert(0, 'ie_estab', ie_estab)
-        df_temp.insert(0, 'cnpj_estab', cnpj_estab)
-        df_temp.insert(0, 'periodo', data_efd)
-        df_temp.insert(0, 'id_pai', None)
-        df_temp.insert(0, 'id', composite_id)
-
-        # Assign parent IDs using the composite id and forward-fill within the file
-        df_temp.loc[df_temp['1'].isin(PARENT_REG_CODES), 'id_pai'] = df_temp['id']
-        df_temp['id_pai'] = df_temp['id_pai'].ffill()
-        df_temp['cnpj_estab'] = df_temp['cnpj_estab'].ffill()
-
-        # Append this file’s DataFrame to the list
-        dfs.append(df_temp)
-
-    # Concatenate all files into a single DataFrame
-    df_sped_fiscal = pd.concat(dfs, ignore_index=True)
-
-    # In case the same file is imported again, drop duplicate composite IDs
-    if "id" in df_sped_fiscal.columns:
-        df_sped_fiscal = df_sped_fiscal.drop_duplicates(subset=["id"], keep="last")
-
-    return df_sped_fiscal
-
-
-# ECD
-@st.cache_data
-def load_and_process_ecd(uploaded_file):
-    """Load one or more ECD files and build stable, cross-file unique IDs.
-    Backwards-compatible: accepts a single file or a list of files.
-    """
-    # Validate input
-    if uploaded_file is None or (isinstance(uploaded_file, list) and len(uploaded_file) == 0):
-        st.error("Por favor, carregue pelo menos um arquivo .txt")
-        st.stop()
-
-    DELIMITER = '|'
-    ENCODING = 'latin-1'
-    COLUMN_NAMES = [str(i) for i in range(40)]
-    PARENT_REG_CODES = [
-        "0000", "0001", "C001", "C040", "C050", "C150", "C600", "I001", "I010", "I050", "I150"
-    ]
-
-    # Normalize to a list for multi-file support
-    files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
-    all_dfs = []
-
-    for file_idx, f in enumerate(files):
-        # Robust reader: try fast C engine; on parser error, fall back to Python engine (tolerant to odd quotes/cert bytes)
-        try:
-            f.seek(0)
-            reader = pd.read_csv(
-                f,
-                header=None,
-                delimiter=DELIMITER,
-                names=COLUMN_NAMES,
-                encoding=ENCODING,
-                dtype=str,
-                engine="c",
-                on_bad_lines="skip",
-                chunksize=200_000
-            )
-        except Exception:
-            f.seek(0)
-            reader = pd.read_csv(
-                f,
-                header=None,
-                delimiter=DELIMITER,
-                names=COLUMN_NAMES,
-                encoding=ENCODING,
-                dtype=str,
-                engine="python",
-                on_bad_lines="skip",
-                chunksize=200_000,
-                quoting=csv.QUOTE_NONE
-            )
-
-        dfs = []
-        in_skip = False       # True after first I200, until first I350
-        after_resume = False  # True after first I350 (from that row onwards)
-
-        try:
-            for chunk in reader:
-                codes = chunk['1'].astype(str)
-                mask_i200 = codes.eq('I200')
-                mask_i350 = codes.eq('I350')
-
-                if not in_skip and not after_resume:
-                    has200 = mask_i200.any()
-                    has350 = mask_i350.any()
-
-                    if not has200 and not has350:
-                        # Still before any I200; keep everything
-                        dfs.append(chunk)
-                        continue
-
-                    if has200 and not has350:
-                        # First I200 happens in this chunk: keep rows before it, start skipping
-                        first200 = int(np.argmax(mask_i200.to_numpy()))
-                        if first200 > 0:
-                            dfs.append(chunk.iloc[:first200])
-                        in_skip = True
-                        continue
-
-                    if not has200 and has350:
-                        # No I200 yet but found I350 (rare) → include all; from now on include all next chunks
-                        dfs.append(chunk)
-                        after_resume = True
-                        continue
-
-                    # Both I200 and I350 in same chunk
-                    first200 = int(np.argmax(mask_i200.to_numpy()))
-                    first350 = int(np.argmax(mask_i350.to_numpy()))
-                    if first200 < first350:
-                        # keep rows before I200 AND rows from I350 onward; skip in-between just in this chunk
-                        if first200 > 0:
-                            dfs.append(chunk.iloc[:first200])
-                        dfs.append(chunk.iloc[first350:])
-                        after_resume = True   # resume permanently after first I350
-                        in_skip = False
-                    else:
-                        # I350 appears before I200 (unexpected ordering) → include full chunk and mark resumed
-                        dfs.append(chunk)
-                        after_resume = True
-                        in_skip = False
-                    continue
-
-                if in_skip and not after_resume:
-                    # We are skipping until we hit I350
-                    if mask_i350.any():
-                        first350 = int(np.argmax(mask_i350.to_numpy()))
-                        dfs.append(chunk.iloc[first350:])  # include from I350 onward
-                        in_skip = False
-                        after_resume = True
-                    else:
-                        # Skip entire chunk
-                        continue
-                    continue
-
-                if after_resume:
-                    # After first I350: include everything
-                    dfs.append(chunk)
-                    continue
-        except Exception:
-            # Fallback: pre-trim raw text up to the first |I990| and parse in memory with the Python engine
-            f.seek(0)
-            raw = f.read()
-            text = raw.decode(ENCODING, errors='ignore') if isinstance(raw, (bytes, bytearray)) else str(raw)
-
-            trimmed_lines = []
-            for ln in text.splitlines():
-                trimmed_lines.append(ln)
-                if ln.startswith('|I990|'):
-                    break
-            buf = io.StringIO('\n'.join(trimmed_lines))
-
-            df_fallback = pd.read_csv(
-                buf,
-                header=None,
-                delimiter=DELIMITER,
-                names=COLUMN_NAMES,
-                encoding=ENCODING,
-                dtype=str,
-                engine='python',
-                on_bad_lines='skip',
-                quoting=csv.QUOTE_NONE
-            )
-
-            # Apply the I200..I350 windowing to the single DataFrame
-            if not df_fallback.empty and '1' in df_fallback.columns:
-                codes = df_fallback['1'].astype(str)
-                has200 = codes.eq('I200').any()
-                has350 = codes.eq('I350').any()
-                if has200 and not has350:
-                    first200 = int(np.argmax(codes.eq('I200').to_numpy()))
-                    if first200 > 0:
-                        df_fallback = df_fallback.iloc[:first200].copy()
-                elif has200 and has350:
-                    first200 = int(np.argmax(codes.eq('I200').to_numpy()))
-                    first350 = int(np.argmax(codes.eq('I350').to_numpy()))
-                    if first200 < first350:
-                        df_fallback = pd.concat([
-                            df_fallback.iloc[:first200],
-                            df_fallback.iloc[first350:]
-                        ], ignore_index=True)
-            dfs = [df_fallback]
-
-        df_temp = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=COLUMN_NAMES)
-
-        # Skip empty/invalid files
-        if df_temp.empty:
-            continue
-
-        # Trim at ECD end marker I990 (include the I990 row)
-        if '1' in df_temp.columns:
-            mask_all = df_temp['1'].astype(str).eq('I990')
-            if mask_all.any():
-                cut = int(np.argmax(mask_all.to_numpy()))
-                df_temp = df_temp.iloc[:cut+1].copy()
-
-        # Extract period and CNPJ for this file
-        ano_ecd = df_temp.loc[0, '3'][4:] if pd.notna(df_temp.loc[0, '3']) else None
-        cnpj = df_temp.loc[0, '6'] if pd.notna(df_temp.loc[0, '6']) else None
-
-        # Drop unnecessary column
-        if '0' in df_temp.columns:
-            df_temp.drop(columns=['0'], inplace=True)
-
-        # Build deterministic, cross-file row id
-        # id := "<fileidx>|<ano>|<cnpj>|<row_no_zfilled>"
-        prefix_file = str(file_idx)
-        prefix_ano = str(ano_ecd) if ano_ecd is not None else "NA"
-        prefix_cnpj = str(cnpj) if cnpj is not None else "NA"
-        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
-        composite_id = (prefix_file + "|" + prefix_ano + "|" + prefix_cnpj + "|" + row_no).astype("string")
-
-        # Insert new columns
-        df_temp.insert(0, 'cnpj', cnpj)
-        df_temp.insert(0, 'ano', ano_ecd)
-        df_temp.insert(0, 'id_pai', None)
-        df_temp.insert(0, 'id', composite_id)
-
-        # Assign parent IDs
-        df_temp.loc[df_temp['1'].isin(PARENT_REG_CODES), 'id_pai'] = df_temp['id']
-
-        # Forward fill id_pai within this file
-        df_temp['id_pai'] = df_temp['id_pai'].ffill()
-
-        all_dfs.append(df_temp)
-
-    # Concatenate all files
-    df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame(columns=COLUMN_NAMES)
-
-    return df
 
 
 # layout dos datadrames
@@ -1482,15 +1049,15 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             #-----------------------------------------------------
             # importar ECD
             #-----------------------------------------------------
-            if uploaded_sped_ecd_file is not None:
-                ph_ecd_msg.info(f"Importando ECD ({getattr(uploaded_sped_ecd_file, 'name', '')})…")
+            if uploaded_sped_ecd_file and len(uploaded_sped_ecd_file) > 0:
+                ph_ecd_msg.info(f"Importando ECD ({len(uploaded_sped_ecd_file)} arquivo(s))…")
                 ph_ecd_prog.progress(10, text="Lendo ECD…")
             else:
                 ph_ecd_prog.progress(100, text="Nenhum arquivo ECD selecionado.")
                 ph_ecd_msg.warning("ECD não informado — etapa ignorada.")
 
             # Process the files (only if ECD provided)
-            if uploaded_sped_ecd_file is not None:
+            if uploaded_sped_ecd_file and len(uploaded_sped_ecd_file) > 0:
                 df_ecd = load_and_process_ecd(uploaded_sped_ecd_file)
                 ph_ecd_prog.progress(100, text="ECD importado com sucesso.")
                 ph_ecd_msg.success(":material/task_alt: ECD concluído")
@@ -1563,7 +1130,10 @@ elif selected_area == "Área 2: Compras/Entradas":
     st.header("Compras/Entradas")
     st.write('\n')
 
-
+    # Check if files have been processed
+    if not st.session_state.get("processing_done", False):
+        st.warning("⚠️ Por favor, importe e processe os arquivos SPED na Área 1 primeiro.")
+        st.stop()
 
     # Show the tabs relevant to Área 2
     tab_entrada_resumo_pc, tab_entrada_resumo_icms, tab_entrada_industria, tab_entrada_revenda, tab_entrada_uso_consumo, tab_entrada_ativo, tab_entrada_tranf, tab_entrada_outras  = st.tabs([
@@ -1729,6 +1299,11 @@ elif selected_area == "Área 2: Compras/Entradas":
 # Área 3: Vendas/Saídas
 
 elif selected_area == "Área 3: Vendas/Saídas":
+    # Check if files have been processed
+    if not st.session_state.get("processing_done", False):
+        st.warning("⚠️ Por favor, importe e processe os arquivos SPED na Área 1 primeiro.")
+        st.stop()
+
     tab_saida_resumo_pc, tab_saida_resumo_icms, tab_saida_venda_producao, tab_saida_revenda, tab_saida_transf, tab_saida_outras = st.tabs([
         "Resumo PIS/Cofins",
         "Resumo ICMS",
@@ -1851,6 +1426,11 @@ elif selected_area == "Área 3: Vendas/Saídas":
 # Área 4: Serviços
 
 elif selected_area == "Área 4: Serviços":
+    # Check if files have been processed
+    if not st.session_state.get("processing_done", False):
+        st.warning("⚠️ Por favor, importe e processe os arquivos SPED na Área 1 primeiro.")
+        st.stop()
+
     tab_serv_tomados, tab_serv_prestados = st.tabs([
         "Serviços Tomados", 
         "Serviços Prestados"
@@ -1988,7 +1568,12 @@ elif selected_area == "Área 4: Serviços":
 elif selected_area == "Área 5: Reforma Tributária":
     st.header("Reforma Tributária")
     st.write('\n')
-    
+
+    # Check if files have been processed
+    if not st.session_state.get("processing_done", False):
+        st.warning("⚠️ Por favor, importe e processe os arquivos SPED na Área 1 primeiro.")
+        st.stop()
+
     empresa = st.session_state["empresa"]
     raiz_cnpj = st.session_state["raiz_cnpj"]
     st.write(f"**Empresa:** {empresa}")

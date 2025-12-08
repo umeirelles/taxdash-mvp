@@ -341,11 +341,17 @@ def _process_single_ecd_file(uploaded_file, file_index):
     if '0' in df.columns:
         df.drop(columns=['0'], inplace=True)
 
+    # Build deterministic, cross-file row id
+    # id := "<fileidx>|<ano>|<cnpj>|<row_no_zfilled>"
+    prefix_file = str(file_index)
+    prefix_ano = str(ano_ecd) if ano_ecd is not None else "NA"
+    prefix_cnpj = str(cnpj) if cnpj is not None else "NA"
+    row_no = pd.Series(df.index, index=df.index).astype(str).str.zfill(7)
+    composite_id = (prefix_file + "|" + prefix_ano + "|" + prefix_cnpj + "|" + row_no).astype("string")
+
     df.insert(0, 'cnpj', cnpj)
     df.insert(0, 'ano', ano_ecd)
     df.insert(0, 'id_pai', None)
-    row_no = pd.Series(df.index, index=df.index).astype(str)
-    composite_id = (str(file_index) + "|" + row_no).astype("string")
     df.insert(0, 'id', composite_id)
 
     df.loc[df['1'].isin(parent_reg_codes), 'id_pai'] = df['id']
@@ -356,6 +362,9 @@ def _process_single_ecd_file(uploaded_file, file_index):
 
 @st.cache_data
 def load_and_process_ecd(uploaded_files):
+    """Load one or more ECD files and build stable, cross-file unique IDs.
+    Backwards-compatible: accepts a single file or a list of files.
+    """
     if uploaded_files is None or (isinstance(uploaded_files, list) and len(uploaded_files) == 0):
         st.error("Por favor, carregue pelo menos um arquivo .txt")
         st.stop()

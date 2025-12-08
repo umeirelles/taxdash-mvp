@@ -241,9 +241,12 @@ def load_and_process_sped_fiscal(uploaded_files):
 # ECD
 @st.cache_data
 def load_and_process_ecd(uploaded_file):
-    # If no file is provided, inform the user and stop execution
-    if uploaded_file is None:
-        st.error("Por favor, carregue um arquivo .txt")
+    """Load one or more ECD files and build stable, cross-file unique IDs.
+    Backwards-compatible: accepts a single file or a list of files.
+    """
+    # Validate input
+    if uploaded_file is None or (isinstance(uploaded_file, list) and len(uploaded_file) == 0):
+        st.error("Por favor, carregue pelo menos um arquivo .txt")
         st.stop()
 
     DELIMITER = '|'
@@ -253,174 +256,195 @@ def load_and_process_ecd(uploaded_file):
         "0000", "0001", "C001", "C040", "C050", "C150", "C600", "I001", "I010", "I050", "I150"
     ]
 
-    # Robust reader: try fast C engine; on parser error, fall back to Python engine (tolerant to odd quotes/cert bytes)
-    try:
-        uploaded_file.seek(0)
-        reader = pd.read_csv(
-            uploaded_file,
-            header=None,
-            delimiter=DELIMITER,
-            names=COLUMN_NAMES,
-            encoding=ENCODING,
-            dtype=str,
-            engine="c",
-            on_bad_lines="skip",
-            chunksize=200_000
-        )
-    except Exception:
-        uploaded_file.seek(0)
-        reader = pd.read_csv(
-            uploaded_file,
-            header=None,
-            delimiter=DELIMITER,
-            names=COLUMN_NAMES,
-            encoding=ENCODING,
-            dtype=str,
-            engine="python",
-            on_bad_lines="skip",
-            chunksize=200_000,
-            quoting=csv.QUOTE_NONE
-        )
+    # Normalize to a list for multi-file support
+    files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
+    all_dfs = []
 
-    dfs = []
-    in_skip = False       # True after first I200, until first I350
-    after_resume = False  # True after first I350 (from that row onwards)
+    for file_idx, f in enumerate(files):
+        # Robust reader: try fast C engine; on parser error, fall back to Python engine (tolerant to odd quotes/cert bytes)
+        try:
+            f.seek(0)
+            reader = pd.read_csv(
+                f,
+                header=None,
+                delimiter=DELIMITER,
+                names=COLUMN_NAMES,
+                encoding=ENCODING,
+                dtype=str,
+                engine="c",
+                on_bad_lines="skip",
+                chunksize=200_000
+            )
+        except Exception:
+            f.seek(0)
+            reader = pd.read_csv(
+                f,
+                header=None,
+                delimiter=DELIMITER,
+                names=COLUMN_NAMES,
+                encoding=ENCODING,
+                dtype=str,
+                engine="python",
+                on_bad_lines="skip",
+                chunksize=200_000,
+                quoting=csv.QUOTE_NONE
+            )
 
-    try:
-        for chunk in reader:
-            codes = chunk['1'].astype(str)
-            mask_i200 = codes.eq('I200')
-            mask_i350 = codes.eq('I350')
+        dfs = []
+        in_skip = False       # True after first I200, until first I350
+        after_resume = False  # True after first I350 (from that row onwards)
 
-            if not in_skip and not after_resume:
-                has200 = mask_i200.any()
-                has350 = mask_i350.any()
+        try:
+            for chunk in reader:
+                codes = chunk['1'].astype(str)
+                mask_i200 = codes.eq('I200')
+                mask_i350 = codes.eq('I350')
 
-                if not has200 and not has350:
-                    # Still before any I200; keep everything
-                    dfs.append(chunk)
-                    continue
+                if not in_skip and not after_resume:
+                    has200 = mask_i200.any()
+                    has350 = mask_i350.any()
 
-                if has200 and not has350:
-                    # First I200 happens in this chunk: keep rows before it, start skipping
+                    if not has200 and not has350:
+                        # Still before any I200; keep everything
+                        dfs.append(chunk)
+                        continue
+
+                    if has200 and not has350:
+                        # First I200 happens in this chunk: keep rows before it, start skipping
+                        first200 = int(np.argmax(mask_i200.to_numpy()))
+                        if first200 > 0:
+                            dfs.append(chunk.iloc[:first200])
+                        in_skip = True
+                        continue
+
+                    if not has200 and has350:
+                        # No I200 yet but found I350 (rare) → include all; from now on include all next chunks
+                        dfs.append(chunk)
+                        after_resume = True
+                        continue
+
+                    # Both I200 and I350 in same chunk
                     first200 = int(np.argmax(mask_i200.to_numpy()))
-                    if first200 > 0:
-                        dfs.append(chunk.iloc[:first200])
-                    in_skip = True
-                    continue
-
-                if not has200 and has350:
-                    # No I200 yet but found I350 (rare) → include all; from now on include all next chunks
-                    dfs.append(chunk)
-                    after_resume = True
-                    continue
-
-                # Both I200 and I350 in same chunk
-                first200 = int(np.argmax(mask_i200.to_numpy()))
-                first350 = int(np.argmax(mask_i350.to_numpy()))
-                if first200 < first350:
-                    # keep rows before I200 AND rows from I350 onward; skip in-between just in this chunk
-                    if first200 > 0:
-                        dfs.append(chunk.iloc[:first200])
-                    dfs.append(chunk.iloc[first350:])
-                    after_resume = True   # resume permanently after first I350
-                    in_skip = False
-                else:
-                    # I350 appears before I200 (unexpected ordering) → include full chunk and mark resumed
-                    dfs.append(chunk)
-                    after_resume = True
-                    in_skip = False
-                continue
-
-            if in_skip and not after_resume:
-                # We are skipping until we hit I350
-                if mask_i350.any():
                     first350 = int(np.argmax(mask_i350.to_numpy()))
-                    dfs.append(chunk.iloc[first350:])  # include from I350 onward
-                    in_skip = False
-                    after_resume = True
-                else:
-                    # Skip entire chunk
+                    if first200 < first350:
+                        # keep rows before I200 AND rows from I350 onward; skip in-between just in this chunk
+                        if first200 > 0:
+                            dfs.append(chunk.iloc[:first200])
+                        dfs.append(chunk.iloc[first350:])
+                        after_resume = True   # resume permanently after first I350
+                        in_skip = False
+                    else:
+                        # I350 appears before I200 (unexpected ordering) → include full chunk and mark resumed
+                        dfs.append(chunk)
+                        after_resume = True
+                        in_skip = False
                     continue
-                continue
 
-            if after_resume:
-                # After first I350: include everything
-                dfs.append(chunk)
-                continue
-    except Exception:
-        # Fallback: pre-trim raw text up to the first |I990| and parse in memory with the Python engine
-        uploaded_file.seek(0)
-        raw = uploaded_file.read()
-        text = raw.decode(ENCODING, errors='ignore') if isinstance(raw, (bytes, bytearray)) else str(raw)
+                if in_skip and not after_resume:
+                    # We are skipping until we hit I350
+                    if mask_i350.any():
+                        first350 = int(np.argmax(mask_i350.to_numpy()))
+                        dfs.append(chunk.iloc[first350:])  # include from I350 onward
+                        in_skip = False
+                        after_resume = True
+                    else:
+                        # Skip entire chunk
+                        continue
+                    continue
 
-        trimmed_lines = []
-        for ln in text.splitlines():
-            trimmed_lines.append(ln)
-            if ln.startswith('|I990|'):
-                break
-        buf = io.StringIO('\n'.join(trimmed_lines))
+                if after_resume:
+                    # After first I350: include everything
+                    dfs.append(chunk)
+                    continue
+        except Exception:
+            # Fallback: pre-trim raw text up to the first |I990| and parse in memory with the Python engine
+            f.seek(0)
+            raw = f.read()
+            text = raw.decode(ENCODING, errors='ignore') if isinstance(raw, (bytes, bytearray)) else str(raw)
 
-        df_fallback = pd.read_csv(
-            buf,
-            header=None,
-            delimiter=DELIMITER,
-            names=COLUMN_NAMES,
-            encoding=ENCODING,
-            dtype=str,
-            engine='python',
-            on_bad_lines='skip',
-            quoting=csv.QUOTE_NONE
-        )
+            trimmed_lines = []
+            for ln in text.splitlines():
+                trimmed_lines.append(ln)
+                if ln.startswith('|I990|'):
+                    break
+            buf = io.StringIO('\n'.join(trimmed_lines))
 
-        # Apply the I200..I350 windowing to the single DataFrame
-        if not df_fallback.empty and '1' in df_fallback.columns:
-            codes = df_fallback['1'].astype(str)
-            has200 = codes.eq('I200').any()
-            has350 = codes.eq('I350').any()
-            if has200 and not has350:
-                first200 = int(np.argmax(codes.eq('I200').to_numpy()))
-                if first200 > 0:
-                    df_fallback = df_fallback.iloc[:first200].copy()
-            elif has200 and has350:
-                first200 = int(np.argmax(codes.eq('I200').to_numpy()))
-                first350 = int(np.argmax(codes.eq('I350').to_numpy()))
-                if first200 < first350:
-                    df_fallback = pd.concat([
-                        df_fallback.iloc[:first200],
-                        df_fallback.iloc[first350:]
-                    ], ignore_index=True)
-        dfs = [df_fallback]
+            df_fallback = pd.read_csv(
+                buf,
+                header=None,
+                delimiter=DELIMITER,
+                names=COLUMN_NAMES,
+                encoding=ENCODING,
+                dtype=str,
+                engine='python',
+                on_bad_lines='skip',
+                quoting=csv.QUOTE_NONE
+            )
 
-    df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=COLUMN_NAMES)
+            # Apply the I200..I350 windowing to the single DataFrame
+            if not df_fallback.empty and '1' in df_fallback.columns:
+                codes = df_fallback['1'].astype(str)
+                has200 = codes.eq('I200').any()
+                has350 = codes.eq('I350').any()
+                if has200 and not has350:
+                    first200 = int(np.argmax(codes.eq('I200').to_numpy()))
+                    if first200 > 0:
+                        df_fallback = df_fallback.iloc[:first200].copy()
+                elif has200 and has350:
+                    first200 = int(np.argmax(codes.eq('I200').to_numpy()))
+                    first350 = int(np.argmax(codes.eq('I350').to_numpy()))
+                    if first200 < first350:
+                        df_fallback = pd.concat([
+                            df_fallback.iloc[:first200],
+                            df_fallback.iloc[first350:]
+                        ], ignore_index=True)
+            dfs = [df_fallback]
 
-    # Trim at ECD end marker I990 (include the I990 row)
-    if not df.empty and '1' in df.columns:
-        mask_all = df['1'].astype(str).eq('I990')
-        if mask_all.any():
-            cut = int(np.argmax(mask_all.to_numpy()))
-            df = df.iloc[:cut+1].copy()
+        df_temp = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=COLUMN_NAMES)
 
-    # Extract period and CNPJ
-    ano_ecd = df.loc[0, '3'][4:] if pd.notna(df.loc[0, '3']) else None
-    cnpj = df.loc[0, '6'] if pd.notna(df.loc[0, '6']) else None
+        # Skip empty/invalid files
+        if df_temp.empty:
+            continue
 
-    # Drop unnecessary column
-    if '0' in df.columns:
-        df.drop(columns=['0'], inplace=True)
+        # Trim at ECD end marker I990 (include the I990 row)
+        if '1' in df_temp.columns:
+            mask_all = df_temp['1'].astype(str).eq('I990')
+            if mask_all.any():
+                cut = int(np.argmax(mask_all.to_numpy()))
+                df_temp = df_temp.iloc[:cut+1].copy()
 
-    # Insert new columns
-    df.insert(0, 'cnpj', cnpj)
-    df.insert(0, 'ano', ano_ecd)
-    df.insert(0, 'id_pai', None)
-    df.insert(0, 'id', df.index.astype(str))
+        # Extract period and CNPJ for this file
+        ano_ecd = df_temp.loc[0, '3'][4:] if pd.notna(df_temp.loc[0, '3']) else None
+        cnpj = df_temp.loc[0, '6'] if pd.notna(df_temp.loc[0, '6']) else None
 
-    # Assign parent IDs
-    df.loc[df['1'].isin(PARENT_REG_CODES), 'id_pai'] = df['id']
+        # Drop unnecessary column
+        if '0' in df_temp.columns:
+            df_temp.drop(columns=['0'], inplace=True)
 
-    # Forward fill missing CNPJ and id_pai
-    df['id_pai'] = df['id_pai'].ffill()
-    #df['cnpj'] = df['cnpj'].ffill()
+        # Build deterministic, cross-file row id
+        # id := "<fileidx>|<ano>|<cnpj>|<row_no_zfilled>"
+        prefix_file = str(file_idx)
+        prefix_ano = str(ano_ecd) if ano_ecd is not None else "NA"
+        prefix_cnpj = str(cnpj) if cnpj is not None else "NA"
+        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
+        composite_id = (prefix_file + "|" + prefix_ano + "|" + prefix_cnpj + "|" + row_no).astype("string")
+
+        # Insert new columns
+        df_temp.insert(0, 'cnpj', cnpj)
+        df_temp.insert(0, 'ano', ano_ecd)
+        df_temp.insert(0, 'id_pai', None)
+        df_temp.insert(0, 'id', composite_id)
+
+        # Assign parent IDs
+        df_temp.loc[df_temp['1'].isin(PARENT_REG_CODES), 'id_pai'] = df_temp['id']
+
+        # Forward fill id_pai within this file
+        df_temp['id_pai'] = df_temp['id_pai'].ffill()
+
+        all_dfs.append(df_temp)
+
+    # Concatenate all files
+    df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame(columns=COLUMN_NAMES)
 
     return df
 
@@ -1280,9 +1304,9 @@ if selected_area == "Área 1: Importar Arquivos SPED":
     
         st.subheader("ECD")
         uploaded_sped_ecd_file = st.file_uploader(
-            label="*Selecione apenas um arquivo ECD*",
+            label="*Selecione um ou mais arquivos ECD*",
             type="txt",
-            accept_multiple_files=False
+            accept_multiple_files=True
         )
         st.markdown('###')
     

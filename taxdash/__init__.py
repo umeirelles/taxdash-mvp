@@ -8,6 +8,7 @@ from .utils import (
     clean_decimal_separators,
     clean_and_convert_numeric,
 )
+from . import processors
 
 __all__ = [
     "load_and_process_data",
@@ -16,4 +17,5 @@ __all__ = [
     "convert_numeric_columns",
     "clean_decimal_separators",
     "clean_and_convert_numeric",
+    "processors",
 ]

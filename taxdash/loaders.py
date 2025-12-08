@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from . import config
+
 
 @st.cache_data
 def load_and_process_data(uploaded_file):
@@ -13,15 +15,10 @@ def load_and_process_data(uploaded_file):
         st.error("Por favor, carregue pelo menos um arquivo .txt")
         st.stop()
 
-    delimiter = '|'
-    encoding = 'latin-1'
-    column_names = [str(i) for i in range(40)]
-    parent_reg_codes = [
-        "0000", "0140", "A100", "C100", "C180", "C190", "C380", "C400", "C500", "C600", "C800", "D100", "D500",
-        "F100", "F120", "F130", "F150", "F200", "F500", "F600", "F700", "F800", "I100", "M100", "M200",
-        "M300", "M350", "M400", "M500", "M600", "M700", "M800", "P100", "P200", "1010", "1020", "1050",
-        "1100", "1200", "1300", "1500", "1600", "1700", "1800", "1900"
-    ]
+    delimiter = config.DELIMITER
+    encoding = config.ENCODING
+    column_names = [str(i) for i in range(config.COLUMN_COUNT_CONTRIB)]
+    parent_reg_codes = config.PARENT_REG_CONTRIB
 
     files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
     dfs = []
@@ -37,7 +34,7 @@ def load_and_process_data(uploaded_file):
             dtype=str,
             engine="python",
             on_bad_lines="skip",
-            chunksize=200_000,
+            chunksize=config.CHUNK_SIZE,
             quoting=csv.QUOTE_NONE
         )
         parts = []
@@ -56,6 +53,10 @@ def load_and_process_data(uploaded_file):
                 cut = int(np.argmax(mask_all.to_numpy()))
                 df_temp = df_temp.iloc[:cut+1].copy()
         if df_temp.empty:
+            continue
+
+        # Bounds check: ensure df_temp has at least one row before accessing row 0
+        if len(df_temp) == 0:
             continue
 
         data_efd = df_temp.loc[0, '7'][2:] if pd.notna(df_temp.loc[0, '7']) else None
@@ -99,19 +100,10 @@ def load_and_process_sped_fiscal(uploaded_files):
         st.error("Por favor, carregue no mínimo um arquivo .txt")
         st.stop()
 
-    delimiter = '|'
-    encoding = 'latin-1'
-    column_names = [str(i) for i in range(42)]
-    parent_reg_codes = [
-        "0000",
-        "C100", "C300", "C350", "C400", "C495", "C500", "C600", "C700", "C800", "C860",
-        "D100", "D300", "D350", "D400", "D500", "D600", "D695", "D700", "D750",
-        "E100", "E200", "E300", "E500",
-        "G110",
-        "H005",
-        "K100", "K200", "K210", "K220", "K230", "K250", "K260", "K270", "K280", "K290", "K300",
-        "1100", "1200", "1300", "1350", "1390", "1400", "1500", "1600", "1601", "1700", "1800", "1900", "1960", "1970", "1980"
-    ]
+    delimiter = config.DELIMITER
+    encoding = config.ENCODING
+    column_names = [str(i) for i in range(config.COLUMN_COUNT_FISCAL)]
+    parent_reg_codes = config.PARENT_REG_FISCAL
 
     dfs = []
     for i, single_file in enumerate(uploaded_files):
@@ -144,7 +136,7 @@ def load_and_process_sped_fiscal(uploaded_files):
                 dtype=str,
                 engine="python",
                 on_bad_lines="skip",
-                chunksize=200_000,
+                chunksize=config.CHUNK_SIZE,
                 quoting=csv.QUOTE_NONE
             )
             parts = []
@@ -158,6 +150,10 @@ def load_and_process_sped_fiscal(uploaded_files):
                 parts.append(chunk)
             df_temp = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=column_names)
         if df_temp.empty:
+            continue
+
+        # Bounds check: ensure df_temp has at least one row before accessing row 0
+        if len(df_temp) == 0:
             continue
 
         data_efd = df_temp.loc[0, '4'][2:] if pd.notna(df_temp.loc[0, '4']) else None
@@ -195,12 +191,10 @@ def load_and_process_sped_fiscal(uploaded_files):
 
 
 def _process_single_ecd_file(uploaded_file, file_index):
-    delimiter = '|'
-    encoding = 'latin-1'
-    column_names = [str(i) for i in range(40)]
-    parent_reg_codes = [
-        "0000", "0001", "C001", "C040", "C050", "C150", "C600", "I001", "I010", "I050", "I150"
-    ]
+    delimiter = config.DELIMITER
+    encoding = config.ENCODING
+    column_names = [str(i) for i in range(config.COLUMN_COUNT_ECD)]
+    parent_reg_codes = config.PARENT_REG_ECD
 
     try:
         uploaded_file.seek(0)
@@ -213,9 +207,10 @@ def _process_single_ecd_file(uploaded_file, file_index):
             dtype=str,
             engine="c",
             on_bad_lines="skip",
-            chunksize=200_000
+            chunksize=config.CHUNK_SIZE
         )
-    except Exception:
+    except (pd.errors.ParserError, UnicodeDecodeError, csv.Error) as e:
+        # Fallback to Python engine if C engine fails
         uploaded_file.seek(0)
         reader = pd.read_csv(
             uploaded_file,
@@ -226,7 +221,7 @@ def _process_single_ecd_file(uploaded_file, file_index):
             dtype=str,
             engine="python",
             on_bad_lines="skip",
-            chunksize=200_000,
+            chunksize=config.CHUNK_SIZE,
             quoting=csv.QUOTE_NONE
         )
 
@@ -285,7 +280,8 @@ def _process_single_ecd_file(uploaded_file, file_index):
             if after_resume:
                 dfs.append(chunk)
                 continue
-    except Exception:
+    except (pd.errors.ParserError, UnicodeDecodeError, csv.Error, StopIteration) as e:
+        # Fallback: read entire file at once if chunk processing fails
         uploaded_file.seek(0)
         raw = uploaded_file.read()
         text = raw.decode(encoding, errors='ignore') if isinstance(raw, (bytes, bytearray)) else str(raw)
@@ -334,6 +330,10 @@ def _process_single_ecd_file(uploaded_file, file_index):
         if mask_all.any():
             cut = int(np.argmax(mask_all.to_numpy()))
             df = df.iloc[:cut+1].copy()
+
+    # Bounds check: ensure df has at least one row before accessing row 0
+    if len(df) == 0:
+        return pd.DataFrame(columns=['id', 'id_pai', 'ano', 'cnpj'] + [str(i) for i in range(1, 40)])
 
     ano_ecd = df.loc[0, '3'][4:] if pd.notna(df.loc[0, '3']) else None
     cnpj = df.loc[0, '6'] if pd.notna(df.loc[0, '6']) else None

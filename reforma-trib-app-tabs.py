@@ -6,6 +6,7 @@ from dicts import *
 import csv
 import io
 from taxdash import load_and_process_data, load_and_process_sped_fiscal, load_and_process_ecd
+from taxdash import config
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -472,7 +473,7 @@ def Bloco_I_ECD(df):
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def blobo_M_filtering(M105, M110, M210, M400, M510, M610):
+def bloco_M_filtering(M105, M110, M210, M400, M510, M610):
 
     #M110
     df_ajuste_acresc_pis = M110[M110['2'] == '1'][['4', 'tipo_ajuste', '6', '3', '5', '7']].sort_values(by='3', ascending=False)
@@ -485,10 +486,10 @@ def blobo_M_filtering(M105, M110, M210, M400, M510, M610):
     #M105
     df_cred_por_tipo = M105.groupby(['2', 'NAT_BC_CRED'])['7'].sum().round(2).reset_index().sort_values(by='7', ascending=False)
         # adicionando o valor dos Ajustes de Acréscimo (M110/M550) no Dataframe
-    new_row = ['-', 'ajuste de crédito', ((vlr_ajuste_acresc_pis + vlr_ajuste_acresc_cofins)/0.0925)]  
+    new_row = ['-', 'ajuste de crédito', ((vlr_ajuste_acresc_pis + vlr_ajuste_acresc_cofins)/config.PIS_COFINS_RATE)]
     df_cred_por_tipo.loc[len(df_cred_por_tipo)] = new_row
     cred_bc_total = df_cred_por_tipo['7'].sum()      # soma das bc de cada tipo de credito
-    df_cred_por_tipo['VLR_CRED_PIS_COFINS'] = (df_cred_por_tipo['7'] * 0.0925).apply(lambda x: round(x,2))
+    df_cred_por_tipo['VLR_CRED_PIS_COFINS'] = (df_cred_por_tipo['7'] * config.PIS_COFINS_RATE).apply(lambda x: round(x,2))
     df_cred_por_tipo['proporção'] = (df_cred_por_tipo['7'] / cred_bc_total * 100).apply(lambda x: f"{x:.0f}%")
     df_cred_por_tipo = df_cred_por_tipo.rename(columns={
         '2': 'CST_PIS_COFINS',
@@ -551,7 +552,7 @@ def blobo_M_filtering(M105, M110, M210, M400, M510, M610):
     return df_cred_por_tipo_all, df_cred_por_tipo, cred_bc_total, cred_total, df_receitas_com_debito, df_receitas_sem_debito, df_ajuste_acresc_pis, vlr_ajuste_acresc_pis, df_ajuste_acresc_cofins, vlr_ajuste_acresc_cofins
 
 
-def blobo_A_filtering(A100, A170):
+def bloco_A_filtering(A100, A170):
 
     df_serv_tomados = A170[A170['ind_oper'] == '0'].groupby(['ind_oper','3', 'descr_serv_0200', '9', '11', '15'], dropna=False)[['5', '10', '12', '16', 'iss']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
     df_serv_tomados['IBS'] = 0
@@ -587,7 +588,7 @@ def blobo_A_filtering(A100, A170):
     return df_serv_tomados, df_serv_prestados
 
 
-def blobo_C_filtering(C100, C170, C175, C181, C185):
+def bloco_C_filtering(C100, C170, C175, C181, C185):
 
 
     df_C170_saidas = C170[(C170['ind_oper'] == '1') & (C170['cfop_descr'].str.lower().fillna('').str.startswith("venda"))]
@@ -724,34 +725,31 @@ def base_saidas_reforma(C100_SF, C197_SF, C170_SC):
 
     C170_SC["ie_estab_prefix"] = C170_SC["ie_estab"].astype(str).str[:4]
 
-    # For each row, get the IBS rate from `regras_ibs_saidas_zfm`
-    def get_ibs(row):
-        cfop = str(row["11"])
-        prefix = row["ie_estab_prefix"]
+    # Vectorized IBS calculation - much faster than row-wise apply
+    C170_SC["cfop_str"] = C170_SC["11"].astype(str)
+    # Create lookup key as tuple (prefix, cfop)
+    lookup_keys = list(zip(C170_SC["ie_estab_prefix"], C170_SC["cfop_str"]))
+    # Convert dict to Series for vectorized lookups
+    ibs_rates_series = pd.Series(regras_ibs_saidas_zfm)
+    # Try exact lookup
+    ibs_rates = pd.Series(lookup_keys).map(ibs_rates_series)
+    # For NaN values, try fallback with wildcard
+    fallback_keys = list(zip(['*'] * len(C170_SC), C170_SC["cfop_str"]))
+    ibs_rates_fallback = pd.Series(fallback_keys).map(ibs_rates_series)
+    ibs_rates = ibs_rates.fillna(ibs_rates_fallback).fillna(0.0)
+    C170_SC["IBS"] = ibs_rates.values * C170_SC["7"]
 
-        # Try exact rule (prefix, cfop); if not found, fall back to ('*', cfop)
-        rate = regras_ibs_saidas_zfm.get((prefix, cfop))
-        if rate is None:
-            rate = regras_ibs_saidas_zfm.get(('*', cfop), 0.0)
+    # Vectorized CBS calculation - much faster than row-wise apply
+    cbs_rates_series = pd.Series(regras_cbs_saidas_zfm)
+    # Try exact lookup
+    cbs_rates = pd.Series(lookup_keys).map(cbs_rates_series)
+    # For NaN values, try fallback with wildcard
+    cbs_rates_fallback = pd.Series(fallback_keys).map(cbs_rates_series)
+    cbs_rates = cbs_rates.fillna(cbs_rates_fallback).fillna(0.0)
+    C170_SC["CBS"] = cbs_rates.values * C170_SC["7"]
 
-        return rate * row["7"]
-
-    # For each row, get the CBS rate from `regras_cbs_saidas_zfm`
-    def get_cbs(row):
-        cfop = str(row["11"])
-        prefix = row["ie_estab_prefix"]
-
-        # Try exact rule (prefix, cfop); if not found, fall back to ('*', cfop)
-        rate = regras_cbs_saidas_zfm.get((prefix, cfop))
-        if rate is None:
-            rate = regras_cbs_saidas_zfm.get(('*', cfop), 0.0)
-
-        return rate * row["7"]
-    
-
-    # Now apply them
-    C170_SC["IBS"] = C170_SC.apply(get_ibs, axis=1)
-    C170_SC["CBS"] = C170_SC.apply(get_cbs, axis=1)
+    # Clean up temporary column
+    C170_SC = C170_SC.drop(columns=["cfop_str"])
 
     # update column names
     C170_SC = C170_SC.rename(columns={
@@ -1039,13 +1037,13 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             M100, M105, M110, M210, M400, M510, M610 = Bloco_M(df_contrib)
             (df_cred_por_tipo_all, df_cred_por_tipo, cred_bc_total, cred_total, df_receitas_com_debito, 
             df_receitas_sem_debito, df_ajuste_acresc_pis, vlr_ajuste_acresc_pis, 
-            df_ajuste_acresc_cofins, vlr_ajuste_acresc_cofins) = blobo_M_filtering(M105, M110, M210, M400, M510, M610)
+            df_ajuste_acresc_cofins, vlr_ajuste_acresc_cofins) = bloco_M_filtering(M105, M110, M210, M400, M510, M610)
             A100, A170 = Bloco_A(df_contrib, reg_0140, reg_0150, reg_0200)
-            df_serv_tomados, df_serv_prestados = blobo_A_filtering(A100, A170)
+            df_serv_tomados, df_serv_prestados = bloco_A_filtering(A100, A170)
             C100, C170, C175, C181, C185 = Bloco_C(df_contrib, reg_0140, reg_0150, reg_0200)
             (df_C170_por_mod55_aliq, df_C170_COMPRA_por_item_cfop_cst_aliq_ncm, 
             df_C175_por_mod65_aliq, df_C170_venda_por_ncm, df_final_venda_por_estab, 
-            df_final_venda_por_uf_estab, df_final_venda_por_cfop, df_C170_saidas) = blobo_C_filtering(C100, C170, C175, C181, C185)
+            df_final_venda_por_uf_estab, df_final_venda_por_cfop, df_C170_saidas) = bloco_C_filtering(C100, C170, C175, C181, C185)
             #-----------------------------------------------------
             # importar ECD
             #-----------------------------------------------------

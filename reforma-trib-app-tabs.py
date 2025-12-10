@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import csv
-import io
 from taxdash import load_and_process_data, load_and_process_sped_fiscal, load_and_process_ecd
 from taxdash import config, processors
 
@@ -12,7 +10,7 @@ from dicts import (
     tab_4_3_7, tab_4_3_8, tab_4_3_5, cst_pis_cofins, cfop_cod_descr, cod_uf,
     cst_icms, sped_fiscal_tab_5_3_AM, sped_fiscal_tab_5_1_1, sped_fiscal_tab_5_4,
     sped_fiscal_cod_receita_AM, sped_fiscal_tab_ind_apur_icms_AM, sped_fiscal_tab_5_2,
-    PLANO_CONTAS_REF, regras_ibs_saidas_zfm, regras_cbs_saidas_zfm
+    PLANO_CONTAS_REF, regras_ibs_saidas_zfm, regras_cbs_saidas_zfm, cta_ref_creditavel
 )
 
 pd.set_option('display.max_columns', None)
@@ -56,7 +54,7 @@ def style_df(df):
 
 def base_saidas_reforma(C100_SF, C197_SF, C170_SC):
 
-    C170_SC = C170_SC[C170_SC['ind_oper'] == '1']
+    C170_SC = C170_SC[C170_SC['ind_oper'] == '1'].copy()
 
 
     # ----------------------------------------------------------------
@@ -316,7 +314,7 @@ if selected_area == "Área 1: Importar Arquivos SPED":
 
         st.markdown('###')
 
-        if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True):
+        if st.button("🚀 Processar Arquivos", type='primary', width='stretch'):
 
             # -----------------------------------------------------
             # Visual feedback: list selected files + stage progress
@@ -557,21 +555,23 @@ elif selected_area == "Área 2: Compras/Entradas":
         st.write("**Receita Total:**", f"R$ {receita_total:,.2f}")
 
         receita_não_tributada = df_receitas_sem_debito['3'].sum()
-        st.write("**Receitas Não Tributadas:**", f"R$ {receita_não_tributada:,.2f}", f"({(receita_não_tributada/receita_total*100):.0f}%)")
+        pct_nao_tributada = (receita_não_tributada/receita_total*100) if receita_total > 0 else 0
+        st.write("**Receitas Não Tributadas:**", f"R$ {receita_não_tributada:,.2f}", f"({pct_nao_tributada:.0f}%)")
 
         if not df_receitas_sem_debito.empty:
             on = st.toggle("_Ver detalhamento das 'Receitas Não Tributadas'_", key="toggle_receitas_nao_tributadas")
             if on:
-                st.dataframe(df_receitas_sem_debito, hide_index=True, use_container_width=False)
+                st.dataframe(df_receitas_sem_debito, hide_index=True, width='content')
 
 
         bc_pis_cofins = df_receitas_com_debito['3'].sum()
-        st.write("**Receitas Tributadas:**", f"R$ {bc_pis_cofins:,.2f}", f"({(bc_pis_cofins/receita_total*100):.0f}%)")
+        pct_tributada = (bc_pis_cofins/receita_total*100) if receita_total > 0 else 0
+        st.write("**Receitas Tributadas:**", f"R$ {bc_pis_cofins:,.2f}", f"({pct_tributada:.0f}%)")
 
         if not df_receitas_com_debito.empty:
             on = st.toggle("_Ver detalhamento da 'Receitas Tributadas'_", key="toggle_receitas_tributadas")
             if on:
-                st.dataframe(df_receitas_com_debito, hide_index=True, use_container_width=False)
+                st.dataframe(df_receitas_com_debito, hide_index=True, width='content')
 
         debito_pis_cofins = df_receitas_com_debito['11'].sum() + df_receitas_com_debito['valor_cofins'].sum()     
         st.write("**Débito Total de PIS/Cofins no período:**", f"R$ {debito_pis_cofins:,.2f}")
@@ -597,7 +597,7 @@ elif selected_area == "Área 2: Compras/Entradas":
                 on = st.toggle("_Ver detalhamento por 'Tipo de Crédito' escriturado_", key="toggle_credito_por_tipo")
                 if on:
                     # Create a styled DataFrame
-                    st.dataframe(df_cred_por_tipo_all, hide_index=True, use_container_width=False)
+                    st.dataframe(df_cred_por_tipo_all, hide_index=True, width='content')
 
     
 
@@ -606,31 +606,35 @@ elif selected_area == "Área 2: Compras/Entradas":
                 on = st.toggle("_Ver detalhamento dos 'Ajustes no Crédito'_", key="toggle_ajustes_credito")
                 if on:
                     st.write("Lançamentos de PIS")
-                    st.dataframe(df_ajuste_acresc_pis, hide_index=True, use_container_width=False)
+                    st.dataframe(df_ajuste_acresc_pis, hide_index=True, width='content')
                     st.write("Lançamentos de COFINS")
-                    st.dataframe(df_ajuste_acresc_cofins, hide_index=True, use_container_width=False)
+                    st.dataframe(df_ajuste_acresc_cofins, hide_index=True, width='content')
 
             st.write("**Crédito Total de PIS/Cofins no período:**", f"R$ {cred_total:,.2f}")
 
 
         with col2:
-            fig, ax = plt.subplots()
-            wedges, texts = ax.pie(
-                df_cred_por_tipo['BC_CRED_PIS_COFINS'],
-                labels=None,
-                autopct=None,
-                labeldistance=1.2,
-                pctdistance=1.3
-            )
-            ax.axis('equal')
-            ax.legend(
-                wedges,
-                (df_cred_por_tipo['NAT_BC_CRED'].astype(str) + ' ' + df_cred_por_tipo['proporção']).tolist(),
-                title="Tipo de Crédito",
-                loc="center left",
-                bbox_to_anchor=(1, 0, 0.5, 1)
-            )
-            st.pyplot(fig)
+            # Check for empty OR all-zeros (matplotlib can't render pie with all zeros)
+            if not df_cred_por_tipo.empty and df_cred_por_tipo['BC_CRED_PIS_COFINS'].sum() > 0:
+                fig, ax = plt.subplots()
+                wedges, texts = ax.pie(
+                    df_cred_por_tipo['BC_CRED_PIS_COFINS'],
+                    labels=None,
+                    autopct=None,
+                    labeldistance=1.2,
+                    pctdistance=1.3
+                )
+                ax.axis('equal')
+                ax.legend(
+                    wedges,
+                    (df_cred_por_tipo['NAT_BC_CRED'].astype(str) + ' ' + df_cred_por_tipo['proporção']).tolist(),
+                    title="Tipo de Crédito",
+                    loc="center left",
+                    bbox_to_anchor=(1, 0, 0.5, 1)
+                )
+                st.pyplot(fig)
+            else:
+                st.info("Sem dados de crédito para exibir")
 
     # ---------------------------------------------------------------------------------------------
 
@@ -654,7 +658,7 @@ elif selected_area == "Área 2: Compras/Entradas":
         st.write(f"**CNPJ:** {raiz_cnpj[:2]}.{raiz_cnpj[2:5]}.{raiz_cnpj[5:8]}/{raiz_cnpj[8:12]}-{raiz_cnpj[-2:]}")
         st.divider()
 
-        st.dataframe(df_C170_COMPRA_por_item_cfop_cst_aliq_ncm, hide_index=True, use_container_width=False)
+        st.dataframe(df_C170_COMPRA_por_item_cfop_cst_aliq_ncm, hide_index=True, width='content')
 
     # ---------------------------------------------------------------------------------------------
 
@@ -729,9 +733,11 @@ elif selected_area == "Área 3: Vendas/Saídas":
         st.header("1) Vendas por Tipo de Nota Fiscal")
         st.subheader("1.1) NF-e (Modelo 55)")
         st.write("**Valor Total:**", f"R$ {vlr_venda_mod_55:,.2f}")
-        st.write("**Base de Cálculo:**", f"R$ {vlr_bc_mod_55:,.2f}", f"({(vlr_bc_mod_55/vlr_venda_mod_55*100):.0f}%)")
+        pct_bc_mod_55 = (vlr_bc_mod_55/vlr_venda_mod_55*100) if vlr_venda_mod_55 > 0 else 0
+        st.write("**Base de Cálculo:**", f"R$ {vlr_bc_mod_55:,.2f}", f"({pct_bc_mod_55:.0f}%)")
         st.write("**PIS/Cofins:**", f"R$ {(vlr_pis_venda_mod_55 + vlr_cofins_venda_mod_55):,.2f}")
-        st.write("**Alíquota Média:**", f"{((vlr_pis_venda_mod_55 + vlr_cofins_venda_mod_55)/vlr_venda_mod_55)*100:,.2f}%")
+        aliq_media = ((vlr_pis_venda_mod_55 + vlr_cofins_venda_mod_55)/vlr_venda_mod_55)*100 if vlr_venda_mod_55 > 0 else 0
+        st.write("**Alíquota Média:**", f"{aliq_media:,.2f}%")
         st.write('\n')
         st.write('\n')
 
@@ -757,7 +763,7 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foi declarado nenhum CFOP de Venda.")
         else:
             st.write('*Obs.: Foram considerados apenas CFOPs de Venda.*')
-            st.dataframe(df_final_venda_por_cfop, hide_index=True, use_container_width=False)
+            st.dataframe(df_final_venda_por_cfop, hide_index=True, width='content')
         st.write('\n')
         st.write('\n')
         
@@ -768,7 +774,7 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foi declarada a NCM de nenhum item vendido.")
         else:
             st.write('*Obs.: NFC-e não possuem detalhamento por NCM.*')
-            st.dataframe(df_C170_venda_por_ncm, hide_index=True, use_container_width=False)
+            st.dataframe(df_C170_venda_por_ncm, hide_index=True, width='content')
         st.write('\n')
         st.write('\n')
 
@@ -778,7 +784,7 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foram declaradas as vendas por Estabelecimento.")
         else:
             st.write('*Obs.: A tabela abaixo inclui as vendas de NF-e (Mod 55) e NFC-e (Mod 65).*') 
-            st.dataframe(df_final_venda_por_estab, hide_index=True, use_container_width=False)
+            st.dataframe(df_final_venda_por_estab, hide_index=True, width='content')
         st.write('\n')
         st.write('\n')
 
@@ -788,7 +794,7 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foram declaradas as vendas por UF dos Estabelecimentos.")
         else:
             st.write('*Obs.: A tabela abaixo inclui as vendas de NF-e (Mod 55) e NFC-e (Mod 65).*')
-            st.dataframe(df_final_venda_por_uf_estab, hide_index=True, use_container_width=False)
+            st.dataframe(df_final_venda_por_uf_estab, hide_index=True, width='content')
         st.write('\n')
         st.write('\n')
 
@@ -862,7 +868,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor PIS/Cofins:**", f"R$ {(vlr_pis_serv_tom + vlr_cofins_serv_tom):,.2f}")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que geraram créditos'_", key="toggle_serv_tom_com_cred")
                 if on:
-                    st.dataframe(df_serv_tomados_com_cred, hide_index=True, use_container_width=False)
+                    st.dataframe(df_serv_tomados_com_cred, hide_index=True, width='content')
                 st.write('\n')
                 st.write('\n')
                 
@@ -877,7 +883,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor Total de Serviços Tomados sem crédito:**", f"R$ {vlr_total_serv_tom_sem_cred:,.2f}", f"({(vlr_total_serv_tom_sem_cred/vlr_total_serv_tom*100):.0f}% do total)")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que não geraram créditos'_", key="toggle_serv_tom_sem_cred")
                 if on:
-                    st.dataframe(df_serv_tomados_sem_cred, hide_index=True, use_container_width=False)
+                    st.dataframe(df_serv_tomados_sem_cred, hide_index=True, width='content')
 
 
     # ---------------------------------------------------------------------------------------------
@@ -916,7 +922,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor PIS/Cofins:**", f"R$ {(vlr_pis_serv_com_tributo + vlr_cofins_serv_com_tributo):,.2f}")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que geraram déditos'_", key="toggle_serv_prest_com_debito")
                 if on:
-                    st.dataframe(df_serv_prest_com_tribut, hide_index=True, use_container_width=False)
+                    st.dataframe(df_serv_prest_com_tribut, hide_index=True, width='content')
                 st.write('\n')
                 st.write('\n')
                 
@@ -930,7 +936,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor Total de Serviços Prestados sem dédito:**", f"R$ {vlr_serv_sem_tributo:,.2f}", f"({(vlr_serv_sem_tributo/vlr_serv_prest*100):.0f}% do total)")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que não geraram déditos'_", key="toggle_serv_prest_sem_debito")
                 if on:
-                    st.dataframe(df_serv_prest_sem_tribut, hide_index=True, use_container_width=False)
+                    st.dataframe(df_serv_prest_sem_tribut, hide_index=True, width='content')
 
 
 
@@ -1018,7 +1024,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     #if not df_ecd_groupby_plano_ref.empty:
     #    on = st.toggle("_Clique para ver a tabela I155_", key="toggle_ecd_contas_table")
     #    if on:
-    #        st.dataframe(df_ecd_groupby_plano_ref, hide_index=True, use_container_width=False)
+    #        st.dataframe(df_ecd_groupby_plano_ref, hide_index=True, width='content')
     
 
 
@@ -1035,17 +1041,21 @@ elif selected_area == "Área 5: Reforma Tributária":
     
     # -------------------------------------------------------------------
     st.subheader("**> Resumo por CFOPs de Venda**")
-    df_C170_SF_cfop = df_saidas_reforma[df_saidas_reforma['cfop_descr'].str.lower().fillna('').str.startswith("venda de")].groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_cfop, hide_index=True, use_container_width=False)
+
+    # Performance: Cache filtered DataFrame to avoid repeating the filter
+    df_vendas_filtrado = df_saidas_reforma[df_saidas_reforma['cfop_descr'].str.lower().fillna('').str.startswith("venda de")]
+
+    df_C170_SF_cfop = df_vendas_filtrado.groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
+    st.dataframe(df_C170_SF_cfop, hide_index=True, width='content')
 
     # -------------------------------------------------------------------
     st.subheader("**> Base de Vendas (NCMxCFOPxCSTxALIQ)**")
-    df_vendas_reforma = df_saidas_reforma[df_saidas_reforma['cfop_descr'].str.lower().fillna('').str.startswith("venda de")].groupby(['uf_empresa','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_vendas_reforma, hide_index=True, use_container_width=False)
+    df_vendas_reforma = df_vendas_filtrado.groupby(['uf_empresa','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
+    st.dataframe(df_vendas_reforma, hide_index=True, width='content')
 
     # -------------------------------------------------------------------
     st.subheader("> Base Completa de Saídas")
-    st.dataframe(df_saidas_reforma, hide_index=True, use_container_width=False)
+    st.dataframe(df_saidas_reforma, hide_index=True, width='content')
     
     st.divider()
 
@@ -1070,7 +1080,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     if not df_vendas_prod_reforma.empty:
         st.dataframe(df_vendas_prod_reforma_por_cfop, 
                      hide_index=True, 
-                     use_container_width=False, 
+                     width='content', 
                      column_config={
                         "VL_ITEM": st.column_config.NumberColumn("Valor", format="%.2f")
                     })
@@ -1141,7 +1151,7 @@ elif selected_area == "Área 5: Reforma Tributária":
 
 
     if not df_vendas_prod_reforma.empty:
-        st.dataframe(df_reforma_revendas, hide_index=True, use_container_width=False)
+        st.dataframe(df_reforma_revendas, hide_index=True, width='content')
         st.markdown('#####')
 
             
@@ -1187,7 +1197,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     #st.markdown('##')
     #st.subheader("**1.3) Transferência de Produção Própria**")
     #df_sf_C190_transf_prod_cfop = C190_SF[C190_SF['cfop_descr'].str.lower().fillna('').str.startswith("transferência de produção")].groupby(['ie_estab', '3','cfop_descr'], dropna=False)[['5', '7']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
-    #st.dataframe(df_sf_C190_transf_prod_cfop, hide_index=True, use_container_width=False)
+    #st.dataframe(df_sf_C190_transf_prod_cfop, hide_index=True, width='content')
 
 
     # ------ Outras Saídas -----------------------------------------------------------
@@ -1198,7 +1208,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     #                "venda de produção",
     #                "transferência de produção",
     #                "venda de mercadoria adquirida"))].groupby(['ie_estab', 'CFOP','cfop_descr'], dropna=False)[['VL_ITEM','VL_ICMS','VL_PIS','VL_COFINS','IBS','CBS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    #st.dataframe(df_reforma_outras_saidas, hide_index=True, use_container_width=False)
+    #st.dataframe(df_reforma_outras_saidas, hide_index=True, width='content')
 
 
 
@@ -1208,8 +1218,8 @@ elif selected_area == "Área 5: Reforma Tributária":
 
     st.markdown('##')
     st.subheader("**1.3) Serviços Prestados**")
-    df_serv_prestados['IBS'] = (df_serv_prestados['vlr_servico'] * 0.187).round(2)
-    df_serv_prestados['CBS'] = (df_serv_prestados['vlr_servico'] * 0.093).round(2)
+    df_serv_prestados['IBS'] = (df_serv_prestados['vlr_servico'] * config.IBS_RATE).round(2)
+    df_serv_prestados['CBS'] = (df_serv_prestados['vlr_servico'] * config.CBS_RATE).round(2)
 
     vlr_total_serv_prestados = df_serv_prestados['vlr_servico'].sum()
     vlr_iss_serv_prestados = df_serv_prestados['iss'].sum()
@@ -1229,7 +1239,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     st.markdown('#####')
 
     if not df_vendas_prod_reforma.empty:
-        st.dataframe(df_serv_prestados, hide_index=True, use_container_width=False)
+        st.dataframe(df_serv_prestados, hide_index=True, width='content')
         st.markdown('#####')
     
 
@@ -1282,22 +1292,24 @@ elif selected_area == "Área 5: Reforma Tributária":
     #df_C197_agrupado = C197_SF.groupby(['ind_oper', '1', '2', 'cod_aj_doc', 'ncm', '6'], dropna=False)[['5', '7', '8']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
     #df_C197_agrupado_entradas = df_C197_agrupado[df_C197_agrupado['ind_oper'] == '0'].iloc[:,1:]
     #df_C197_agrupado_saidas = df_C197_agrupado[df_C197_agrupado['ind_oper'] == '1'].iloc[:,1:]
-    #st.dataframe(df_C197_agrupado_entradas, hide_index=True, use_container_width=False)  
+    #st.dataframe(df_C197_agrupado_entradas, hide_index=True, width='content')  
     
     # -------------------------------------------------------------------
     st.subheader("**2.1) Base de Entradas C170 Sped Fiscal (apenas CFOP de compra)**")
+
+    # Performance: Cache filtered DataFrame to avoid repeating the filter
     df_C170_SF_compras = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")]
-    st.dataframe(df_C170_SF_compras, hide_index=True, use_container_width=False)
+    st.dataframe(df_C170_SF_compras, hide_index=True, width='content')
 
     # -------------------------------------------------------------------
     st.subheader("**2.2) Compras (NCMxCFOPxCSTxALIQ)**")
-    df_C170_SF_por_ncm_cfop_cst = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['uf_estab','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_por_ncm_cfop_cst, hide_index=True, use_container_width=False)
+    df_C170_SF_por_ncm_cfop_cst = df_C170_SF_compras.groupby(['uf_estab','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
+    st.dataframe(df_C170_SF_por_ncm_cfop_cst, hide_index=True, width='content')
 
     # -------------------------------------------------------------------
     st.subheader("**2.3) Resumo por CFOPs de Compra**")
-    df_C170_SF_cfop = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_cfop, hide_index=True, use_container_width=False)
+    df_C170_SF_cfop = df_C170_SF_compras.groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
+    st.dataframe(df_C170_SF_cfop, hide_index=True, width='content')
 
     # -------------------------------------------------------------------
     st.subheader("2.4) Bloco M")
@@ -1309,7 +1321,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     else:
         st.write("**Valor Base do Crédito:**", f"R$ {cred_bc_total:,.2f}")
         st.write("**Crédito Total de PIS/Cofins no período:**", f"R$ {cred_total:,.2f}")
-        st.dataframe(df_cred_por_tipo_all, hide_index=True, use_container_width=False)
+        st.dataframe(df_cred_por_tipo_all, hide_index=True, width='content')
 
 
     if not df_ajuste_acresc_pis.empty:
@@ -1317,9 +1329,9 @@ elif selected_area == "Área 5: Reforma Tributária":
         on = st.toggle("_Ver detalhamento dos 'Ajustes no Crédito'_", key="toggle_ajustes_credito")
         if on:
             st.write("Lançamentos de PIS")
-            st.dataframe(df_ajuste_acresc_pis, hide_index=True, use_container_width=False)
+            st.dataframe(df_ajuste_acresc_pis, hide_index=True, width='content')
             st.write("Lançamentos de COFINS")
-            st.dataframe(df_ajuste_acresc_cofins, hide_index=True, use_container_width=False)
+            st.dataframe(df_ajuste_acresc_cofins, hide_index=True, width='content')
 
 
     
@@ -1373,8 +1385,8 @@ elif selected_area == "Área 5: Reforma Tributária":
     # ----- Build VIEW (computed columns) from current state; do not mutate state directly
     view_df = state_df.copy()
     mask_live = view_df["CREDITAVEL"].astype(str).eq("sim")
-    view_df["CREDITO_CBS"] = np.where(mask_live, view_df["VL_CTA"] * 0.093, np.nan)
-    view_df["CREDITO_IBS"] = np.where(mask_live, view_df["VL_CTA"] * 0.187, np.nan)
+    view_df["CREDITO_CBS"] = np.where(mask_live, view_df["VL_CTA"] * config.CBS_RATE, np.nan)
+    view_df["CREDITO_IBS"] = np.where(mask_live, view_df["VL_CTA"] * config.IBS_RATE, np.nan)
     view_df[["CREDITO_CBS", "CREDITO_IBS"]] = view_df[["CREDITO_CBS", "CREDITO_IBS"]].round(2)
     view_df["STATUS"] = np.where(mask_live, "🧮 calculado", "—")
 
@@ -1386,7 +1398,7 @@ elif selected_area == "Área 5: Reforma Tributária":
         view_df,
         key="editor_ecd_i355",
         hide_index=True,
-        use_container_width=False,
+        width='content',
         column_order=[
             "ano", "COD_CTA", "CTA_DESCR", "CTA_REF", "CTA_REF_DESCR", "VL_CTA",
             "CREDITAVEL", "CREDITO_CBS", "CREDITO_IBS", "STATUS"
@@ -1432,8 +1444,8 @@ elif selected_area == "Área 5: Reforma Tributária":
 
             if not before.equals(dest_idx["CREDITAVEL"].astype(str)):
                 st.rerun()
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"Erro ao sincronizar alterações CREDITAVEL: {str(e)}")
 
     # Totals from the recomputed VIEW
     tot_cbs = float(view_df["CREDITO_CBS"].sum(skipna=True))
@@ -1459,16 +1471,16 @@ elif selected_area == "Área 5: Reforma Tributária":
 
 
 
-    #st.dataframe(C197_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(C190_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(C590_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(D190_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(D590_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(E110_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(E111_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(E116_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(REG_1900_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(REG_1920_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(REG_1921_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(REG_1925_SF, hide_index=True, use_container_width=False)
-    #st.dataframe(REG_1926_SF, hide_index=True, use_container_width=False)
+    #st.dataframe(C197_SF, hide_index=True, width='content')
+    #st.dataframe(C190_SF, hide_index=True, width='content')
+    #st.dataframe(C590_SF, hide_index=True, width='content')
+    #st.dataframe(D190_SF, hide_index=True, width='content')
+    #st.dataframe(D590_SF, hide_index=True, width='content')
+    #st.dataframe(E110_SF, hide_index=True, width='content')
+    #st.dataframe(E111_SF, hide_index=True, width='content')
+    #st.dataframe(E116_SF, hide_index=True, width='content')
+    #st.dataframe(REG_1900_SF, hide_index=True, width='content')
+    #st.dataframe(REG_1920_SF, hide_index=True, width='content')
+    #st.dataframe(REG_1921_SF, hide_index=True, width='content')
+    #st.dataframe(REG_1925_SF, hide_index=True, width='content')
+    #st.dataframe(REG_1926_SF, hide_index=True, width='content')

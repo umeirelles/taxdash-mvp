@@ -18,6 +18,10 @@ COLUMN_COUNT_ECD = 40      # ECD
 # Tax rates
 PIS_COFINS_RATE = 0.0925  # Combined PIS/COFINS rate (9.25%)
 
+# Brazilian Tax Reform rates (Reforma Tributaria)
+IBS_RATE = 0.187  # Imposto sobre Bens e Serviços (18.7%)
+CBS_RATE = 0.093  # Contribuição sobre Bens e Serviços (9.3%)
+
 # Parent register codes for SPED Contribuições
 PARENT_REG_CONTRIB = [
     "0000", "0140", "A100", "C100", "C180", "C190", "C380", "C400", "C500",

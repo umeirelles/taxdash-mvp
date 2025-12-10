@@ -82,3 +82,30 @@ def clean_and_convert_numeric(df, columns, inplace=True):
 
     if not inplace:
         return df
+
+
+def format_cnpj(cnpj: str) -> str:
+    """
+    Format a CNPJ string with proper punctuation.
+
+    Args:
+        cnpj: CNPJ string (14 digits)
+
+    Returns:
+        Formatted CNPJ string in format: XX.XXX.XXX/XXXX-XX
+
+    Example:
+        format_cnpj("84501873000178") -> "84.501.873/0001-78"
+    """
+    if not cnpj or not isinstance(cnpj, str):
+        return str(cnpj)
+
+    # Remove any existing formatting
+    cnpj = ''.join(c for c in cnpj if c.isdigit())
+
+    # Ensure we have exactly 14 digits
+    if len(cnpj) != 14:
+        return str(cnpj)
+
+    # Format: XX.XXX.XXX/XXXX-XX
+    return f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"

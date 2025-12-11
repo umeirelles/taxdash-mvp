@@ -1344,7 +1344,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     # Build base I355 table (one-time), including initial 'CREDITAVEL' guess
     df_REG_I355_ECD = REG_I355_ECD.loc[
         REG_I355_ECD['VL_CTA'].fillna(0) != 0,
-        ['ano', 'COD_CTA', 'CTA_DESCR', 'CTA_REF', 'CTA_REF_DESCR', 'VL_CTA']
+        ['ano', 'COD_CTA', 'CTA_DESCR', 'CTA_REF', 'CTA_REF_DESCR', 'VL_CTA', 'IND_DC']
     ].sort_values(by='CTA_REF', ascending=True).reset_index(drop=True)
 
     # ensure numeric
@@ -1400,7 +1400,7 @@ elif selected_area == "Área 5: Reforma Tributária":
         hide_index=True,
         use_container_width=False,
         column_order=[
-            "ano", "COD_CTA", "CTA_DESCR", "CTA_REF", "CTA_REF_DESCR", "VL_CTA",
+            "ano", "COD_CTA", "CTA_DESCR", "CTA_REF", "CTA_REF_DESCR", "VL_CTA", "IND_DC",
             "CREDITAVEL", "CREDITO_CBS", "CREDITO_IBS", "STATUS"
         ],  # hide ROW_KEY from UI (still available via index)
         column_config={
@@ -1413,6 +1413,10 @@ elif selected_area == "Área 5: Reforma Tributária":
             "VL_CTA":      st.column_config.NumberColumn(
                 "VL_CTA (R$)", format="%.2f", disabled=True,
                 help="Valor contábil base; apenas leitura."
+            ),
+            "IND_DC": st.column_config.TextColumn(
+                "D/C", disabled=True,
+                help="Indicador de Débito (D) ou Crédito (C) do registro I355."
             ),
             "CREDITO_CBS": st.column_config.NumberColumn(
                 "CREDITO_CBS 🔒", format="%.2f", disabled=True,

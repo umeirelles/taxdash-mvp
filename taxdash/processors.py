@@ -511,6 +511,9 @@ def Bloco_I_ECD(df, PLANO_CONTAS_REF):
         '9': 'IND_DC_FIN',
     })
 
+    # Deduplicate I155 records from multiple file transmissions
+    REG_I155_ECD = REG_I155_ECD.drop_duplicates(subset=['ano', 'COD_CTA', 'periodo_inicio', 'periodo_final'], keep='last')
+
     REG_I350_ECD = (df[df['1'] == 'I350'].iloc[:,0:6])
     REG_I355_ECD = (df[df['1'] == 'I355']
                     .iloc[:,0:9]
@@ -527,6 +530,10 @@ def Bloco_I_ECD(df, PLANO_CONTAS_REF):
         '4': 'VL_CTA',
         '5': 'IND_DC'
     })
+
+    # Deduplicate I355 records from multiple file transmissions (e.g., retransmissions/corrections)
+    # Keep the last occurrence as it's typically the most recent/corrected version
+    REG_I355_ECD = REG_I355_ECD.drop_duplicates(subset=['ano', 'COD_CTA', 'periodo_final'], keep='last')
 
     return REG_I050_ECD, REG_I051_ECD, REG_I150_ECD, REG_I155_ECD, REG_I200_ECD, REG_I250_ECD, REG_I355_ECD
 

@@ -90,22 +90,27 @@ def extract_file_metadata(file_obj, file_type):
     }
 
 def add_files_to_registry(new_files, file_type):
-    """Add new files to registry, checking for duplicates."""
+    """Add new files to registry, checking for duplicates within the same file type."""
     added = []
     skipped = []
+
+    # Get only the files for this specific type
+    existing = st.session_state.file_registry[file_type]
 
     for f in new_files:
         metadata = extract_file_metadata(f, file_type)
 
-        # Check for duplicate (same name + periodo)
-        existing = st.session_state.file_registry[file_type]
+        # Check for duplicate within THIS file type only (same name + periodo + tipo)
         is_duplicate = any(
-            e['name'] == metadata['name'] and e['periodo'] == metadata['periodo']
+            e['name'] == metadata['name'] and
+            e['periodo'] == metadata['periodo'] and
+            e['tipo'] == metadata['tipo']
             for e in existing
         )
 
         if is_duplicate:
-            skipped.append(metadata['name'])
+            # File already exists in THIS registry - skip silently
+            continue
         else:
             st.session_state.file_registry[file_type].append(metadata)
             added.append(metadata['name'])
@@ -188,20 +193,30 @@ def render_file_dashboard():
                 })
 
         if all_files:
+            # Inject CSS to reduce row height
+            st.markdown("""
+            <style>
+            div[data-testid="stVerticalBlock"] > div:has(div.element-container) {
+                gap: 0.2rem !important;
+            }
+            div.element-container {
+                margin-bottom: -0.5rem !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
             for i, f in enumerate(all_files):
-                col1, col2, col3, col4, col5 = st.columns([1.5, 2.5, 1, 1.5, 0.5])
-                with col1:
-                    st.caption(f['Tipo'])
-                with col2:
-                    st.caption(f['Arquivo'])
-                with col3:
-                    st.caption(f['Período'])
-                with col4:
-                    st.caption(f['CNPJ'])
-                with col5:
-                    if st.button("✕", key=f"del_{f['_id']}", help="Remover"):
-                        remove_file_from_registry(f['_id'], f['_tipo'])
-                        st.rerun()
+                cols = st.columns([1.5, 2.5, 1, 1.5, 0.5], gap="small")
+                with cols[0]:
+                    st.markdown(f"<p style='margin:0;padding:0;font-size:0.85rem;'>{f['Tipo']}</p>", unsafe_allow_html=True)
+                with cols[1]:
+                    st.markdown(f"<p style='margin:0;padding:0;font-size:0.85rem;'>{f['Arquivo']}</p>", unsafe_allow_html=True)
+                with cols[2]:
+                    st.markdown(f"<p style='margin:0;padding:0;font-size:0.85rem;'>{f['Período']}</p>", unsafe_allow_html=True)
+                with cols[3]:
+                    st.markdown(f"<p style='margin:0;padding:0;font-size:0.85rem;'>{f['CNPJ']}</p>", unsafe_allow_html=True)
+                with cols[4]:
+                    st.button("✕", key=f"del_{f['_id']}", help="Remover")
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -422,28 +437,17 @@ if selected_area == "Área 1: Importar Arquivos SPED":
     col1, col2 = st.columns([3, 2])
 
     with col2:
-        # Information panel
-        st.markdown("### :material/info: Informações")
+        # Status panel
+        st.markdown("### :material/checklist: Arquivos Necessários")
 
-        st.info("""
-        **Arquivos obrigatórios:**
-        - SPED Contribuições
-        - SPED Fiscal
+        # Visual status indicators
+        has_contrib = len(st.session_state.file_registry['contrib']) > 0
+        has_fiscal = len(st.session_state.file_registry['fiscal']) > 0
+        has_ecd = len(st.session_state.file_registry['ecd']) > 0
 
-        **Arquivo opcional:**
-        - ECD (Escrituração Contábil)
-        """)
-
-        st.markdown("---")
-
-        st.markdown("### :material/analytics: O que você pode fazer")
-        st.markdown("""
-        - Análise de compras e vendas
-        - Cálculo de créditos PIS/COFINS
-        - Simulação da Reforma Tributária
-        - Análise de operações por CFOP/NCM
-        - Relatórios por estabelecimento e UF
-        """)
+        st.markdown(f"{'✅' if has_contrib else '⬜'} SPED Contribuições")
+        st.markdown(f"{'✅' if has_fiscal else '⬜'} SPED Fiscal")
+        st.markdown(f"{'✅' if has_ecd else '⬜'} ECD *(opcional)*")
 
     with col1:
         # Show file dashboard
@@ -464,16 +468,9 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             if uploaded_sped_ecd_file:
                 added, skipped = add_files_to_registry(uploaded_sped_ecd_file, 'ecd')
                 if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
+                    st.toast(f"✓ {len(added)} arquivo(s) adicionado(s)", icon="✅")
                 if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            ecd_count = len(st.session_state.file_registry['ecd'])
-            if ecd_count > 0:
-                st.info(f"📄 {ecd_count} arquivo(s) ECD no total")
-
-        st.markdown('###')
+                    st.toast(f"⚠️ {len(skipped)} já existente(s)", icon="⚠️")
 
         # SPED Contribuições Section
         with st.container():
@@ -490,16 +487,9 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             if uploaded_contrib_file:
                 added, skipped = add_files_to_registry(uploaded_contrib_file, 'contrib')
                 if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
+                    st.toast(f"✓ {len(added)} arquivo(s) adicionado(s)", icon="✅")
                 if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            contrib_count = len(st.session_state.file_registry['contrib'])
-            if contrib_count > 0:
-                st.info(f"📄 {contrib_count} arquivo(s) SPED Contribuições no total")
-
-        st.markdown('###')
+                    st.toast(f"⚠️ {len(skipped)} já existente(s)", icon="⚠️")
 
         # SPED Fiscal Section
         with st.container():
@@ -516,30 +506,14 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             if uploaded_sped_fiscal_files:
                 added, skipped = add_files_to_registry(uploaded_sped_fiscal_files, 'fiscal')
                 if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
+                    st.toast(f"✓ {len(added)} arquivo(s) adicionado(s)", icon="✅")
                 if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            fiscal_count = len(st.session_state.file_registry['fiscal'])
-            if fiscal_count > 0:
-                st.info(f"📄 {fiscal_count} arquivo(s) SPED Fiscal no total")
-
-        st.markdown('###')
+                    st.toast(f"⚠️ {len(skipped)} já existente(s)", icon="⚠️")
 
         # Check if minimum required files are in registry
         has_contrib = len(st.session_state.file_registry['contrib']) > 0
         has_fiscal = len(st.session_state.file_registry['fiscal']) > 0
         can_process = has_contrib and has_fiscal
-
-        # Show what's missing
-        if not can_process:
-            missing = []
-            if not has_contrib:
-                missing.append("SPED Contribuições")
-            if not has_fiscal:
-                missing.append("SPED Fiscal")
-            st.info(f"ℹ️ Para processar, adicione pelo menos: {', '.join(missing)}")
 
         if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True, disabled=not can_process):
 

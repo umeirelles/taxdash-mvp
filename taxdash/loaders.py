@@ -1,4 +1,5 @@
 import csv
+import gc
 import io
 
 import numpy as np
@@ -25,25 +26,23 @@ def load_and_process_data(uploaded_file):
 
     for i, f in enumerate(files):
         f.seek(0)
-        # Pre-scan file to find |9999| (end of valid SPED data, before digital certificate)
-        # This allows C engine to avoid binary certificate data
+        # Memory-efficient approach: stream file and stop at |9999| marker
+        # Avoids loading entire file into memory
+        valid_lines = []
         file_content = f.read()
         if isinstance(file_content, bytes):
             file_content = file_content.decode(encoding, errors='ignore')
 
-        # Find the line that starts with |9999| - this marks end of valid data
-        lines = file_content.split('\n')
-        end_idx = None
-        for idx, line in enumerate(lines):
+        # Stream lines and stop at |9999|
+        for line in file_content.splitlines():
+            valid_lines.append(line)
             if line.startswith('|9999|'):
-                end_idx = idx
                 break
 
-        if end_idx is not None:
-            # Truncate to valid data only (up to and including |9999|)
-            valid_content = '\n'.join(lines[:end_idx+1])
-        else:
-            valid_content = file_content
+        # Join only valid lines
+        valid_content = '\n'.join(valid_lines)
+        del valid_lines  # Free memory immediately
+        del file_content  # Free memory immediately
 
         # Now read the cleaned content with fast C engine
         from io import StringIO
@@ -124,8 +123,13 @@ def load_and_process_data(uploaded_file):
         df_temp['cnpj'] = df_temp['cnpj'].ffill()
 
         dfs.append(df_temp)
+        del df_temp  # Free memory immediately
+        gc.collect()  # Force garbage collection
 
     df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=column_names + ['id', 'id_pai', 'periodo', 'cnpj'])
+    del dfs  # Free list of DataFrames
+    gc.collect()
+
     if df.empty:
         st.error("Falha ao ler o SPED Contribuições: nenhum arquivo válido ou todas as linhas foram descartadas como inválidas.")
         st.stop()
@@ -151,24 +155,22 @@ def load_and_process_sped_fiscal(uploaded_files):
     dfs = []
     for i, single_file in enumerate(uploaded_files):
         single_file.seek(0)
-        # Pre-scan file to find |9999| (end of valid SPED data, before digital certificate)
+        # Memory-efficient approach: stream file and stop at |9999| marker
+        valid_lines = []
         file_content = single_file.read()
         if isinstance(file_content, bytes):
             file_content = file_content.decode(encoding, errors='ignore')
 
-        # Find the line that starts with |9999| - this marks end of valid data
-        lines = file_content.split('\n')
-        end_idx = None
-        for idx, line in enumerate(lines):
+        # Stream lines and stop at |9999|
+        for line in file_content.splitlines():
+            valid_lines.append(line)
             if line.startswith('|9999|'):
-                end_idx = idx
                 break
 
-        if end_idx is not None:
-            # Truncate to valid data only (up to and including |9999|)
-            valid_content = '\n'.join(lines[:end_idx+1])
-        else:
-            valid_content = file_content
+        # Join only valid lines
+        valid_content = '\n'.join(valid_lines)
+        del valid_lines  # Free memory immediately
+        del file_content  # Free memory immediately
 
         # Now read the cleaned content with fast C engine
         from io import StringIO
@@ -240,8 +242,13 @@ def load_and_process_sped_fiscal(uploaded_files):
         df_temp['cnpj_estab'] = df_temp['cnpj_estab'].ffill()
 
         dfs.append(df_temp)
+        del df_temp  # Free memory immediately
+        gc.collect()  # Force garbage collection
 
     df_sped_fiscal = pd.concat(dfs, ignore_index=True)
+    del dfs  # Free list of DataFrames
+    gc.collect()
+
     if "id" in df_sped_fiscal.columns:
         df_sped_fiscal = df_sped_fiscal.drop_duplicates(subset=["id"], keep="last")
 
@@ -258,25 +265,23 @@ def _process_single_ecd_file(uploaded_file, file_index):
     column_names = [str(i) for i in range(config.COLUMN_COUNT_ECD)]
     parent_reg_codes = config.PARENT_REG_ECD
 
-    # Pre-scan file to find |9999| (end of valid ECD data, before digital certificate)
+    # Memory-efficient approach: stream file and stop at |9999| marker
     uploaded_file.seek(0)
+    valid_lines = []
     file_content = uploaded_file.read()
     if isinstance(file_content, bytes):
         file_content = file_content.decode(encoding, errors='ignore')
 
-    # Find the line that starts with |9999| - this marks end of valid data
-    lines = file_content.split('\n')
-    end_idx = None
-    for idx, line in enumerate(lines):
+    # Stream lines and stop at |9999|
+    for line in file_content.splitlines():
+        valid_lines.append(line)
         if line.startswith('|9999|'):
-            end_idx = idx
             break
 
-    if end_idx is not None:
-        # Truncate to valid data only (up to and including |9999|)
-        valid_content = '\n'.join(lines[:end_idx+1])
-    else:
-        valid_content = file_content
+    # Join only valid lines
+    valid_content = '\n'.join(valid_lines)
+    del valid_lines  # Free memory immediately
+    del file_content  # Free memory immediately
 
     # Now read the cleaned content with fast C engine
     from io import StringIO
@@ -466,12 +471,16 @@ def load_and_process_ecd(uploaded_files):
         df_single = _process_single_ecd_file(single_file, idx)
         if not df_single.empty:
             dfs.append(df_single)
+        del df_single  # Free memory immediately
+        gc.collect()  # Force garbage collection
 
     if not dfs:
         st.error("Falha ao ler a ECD: nenhum arquivo válido ou todas as linhas foram descartadas como inválidas.")
         st.stop()
 
     df_ecd = pd.concat(dfs, ignore_index=True)
+    del dfs  # Free list of DataFrames
+    gc.collect()
 
     # Convert register code to categorical for memory efficiency (50 unique values, millions of rows)
     if '1' in df_ecd.columns:

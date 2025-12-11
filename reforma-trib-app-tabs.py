@@ -429,25 +429,15 @@ if selected_area == "Área 1: Importar Arquivos SPED":
         with st.container():
             st.markdown("### :material/account_balance: ECD - Escrituração Contábil Digital")
             uploaded_sped_ecd_file = st.file_uploader(
-                label="Adicionar arquivos ECD",
+                label="Selecione arquivos ECD",
                 type="txt",
                 accept_multiple_files=True,
                 help="Arquivos ECD em formato .txt",
                 key="ecd_uploader"
             )
 
-            # Add new files to registry when uploaded
             if uploaded_sped_ecd_file:
-                added, skipped = add_files_to_registry(uploaded_sped_ecd_file, 'ecd')
-                if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
-                if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            ecd_count = len(st.session_state.file_registry['ecd'])
-            if ecd_count > 0:
-                st.info(f"📄 {ecd_count} arquivo(s) ECD no total")
+                st.success(f"✓ {len(uploaded_sped_ecd_file)} arquivo(s) selecionado(s)")
 
         st.markdown('###')
 
@@ -455,25 +445,15 @@ if selected_area == "Área 1: Importar Arquivos SPED":
         with st.container():
             st.markdown("### :material/receipt_long: SPED Contribuições (PIS/COFINS)")
             uploaded_contrib_file = st.file_uploader(
-                label="Adicionar arquivos SPED Contribuições",
+                label="Selecione arquivos SPED Contribuições",
                 type="txt",
                 accept_multiple_files=True,
                 help="Arquivos SPED Contribuições (PIS/COFINS) em formato .txt",
                 key="contrib_uploader"
             )
 
-            # Add new files to registry when uploaded
             if uploaded_contrib_file:
-                added, skipped = add_files_to_registry(uploaded_contrib_file, 'contrib')
-                if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
-                if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            contrib_count = len(st.session_state.file_registry['contrib'])
-            if contrib_count > 0:
-                st.info(f"📄 {contrib_count} arquivo(s) SPED Contribuições no total")
+                st.success(f"✓ {len(uploaded_contrib_file)} arquivo(s) selecionado(s)")
 
         st.markdown('###')
 
@@ -481,31 +461,21 @@ if selected_area == "Área 1: Importar Arquivos SPED":
         with st.container():
             st.markdown("### :material/inventory_2: SPED Fiscal (ICMS/IPI)")
             uploaded_sped_fiscal_files = st.file_uploader(
-                label="Adicionar arquivos SPED Fiscal",
+                label="Selecione arquivos SPED Fiscal",
                 type="txt",
                 accept_multiple_files=True,
                 help="Arquivos SPED Fiscal (ICMS/IPI) em formato .txt",
                 key="fiscal_uploader"
             )
 
-            # Add new files to registry when uploaded
             if uploaded_sped_fiscal_files:
-                added, skipped = add_files_to_registry(uploaded_sped_fiscal_files, 'fiscal')
-                if added:
-                    st.success(f"✓ Adicionado(s): {', '.join(added)}")
-                if skipped:
-                    st.warning(f"⚠️ Já existente(s): {', '.join(skipped)}")
-
-            # Show count from registry
-            fiscal_count = len(st.session_state.file_registry['fiscal'])
-            if fiscal_count > 0:
-                st.info(f"📄 {fiscal_count} arquivo(s) SPED Fiscal no total")
+                st.success(f"✓ {len(uploaded_sped_fiscal_files)} arquivo(s) selecionado(s)")
 
         st.markdown('###')
 
         # Check if minimum required files are uploaded
-        has_contrib = len(st.session_state.file_registry['contrib']) > 0
-        has_fiscal = len(st.session_state.file_registry['fiscal']) > 0
+        has_contrib = uploaded_contrib_file and len(uploaded_contrib_file) > 0
+        has_fiscal = uploaded_sped_fiscal_files and len(uploaded_sped_fiscal_files) > 0
         can_process = has_contrib and has_fiscal
 
         # Show what's missing
@@ -515,14 +485,9 @@ if selected_area == "Área 1: Importar Arquivos SPED":
                 missing.append("SPED Contribuições")
             if not has_fiscal:
                 missing.append("SPED Fiscal")
-            st.info(f"ℹ️ Para processar, adicione pelo menos: {', '.join(missing)}")
+            st.info(f"ℹ️ Para processar, selecione pelo menos: {', '.join(missing)}")
 
         if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True, disabled=not can_process):
-
-            # Get files from registry
-            ecd_files = get_files_for_processing('ecd')
-            contrib_files = get_files_for_processing('contrib')
-            fiscal_files = get_files_for_processing('fiscal')
 
             # -----------------------------------------------------
             # Visual feedback: list selected files + stage progress
@@ -544,12 +509,12 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             #-----------------------------------------------------
             # importar SPED FISCAL
             #-----------------------------------------------------
-            ph_fiscal_msg.info(f"Importando SPED Fiscal ({len(fiscal_files)} arquivo(s))…")
+            ph_fiscal_msg.info(f"Importando SPED Fiscal ({len(uploaded_sped_fiscal_files)} arquivo(s))…")
             ph_fiscal_prog.progress(10, text="Lendo SPED Fiscal…")
 
 
             # carregar arquivos efd-fiscal
-            df_sped_fiscal = load_and_process_sped_fiscal(fiscal_files)
+            df_sped_fiscal = load_and_process_sped_fiscal(uploaded_sped_fiscal_files)
             ph_fiscal_prog.progress(100, text="SPED Fiscal importado com sucesso.")
             ph_fiscal_msg.success(":material/task_alt: SPED Fiscal concluído")
 
@@ -585,11 +550,11 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             #-----------------------------------------------------
             # importar SPED CONTRIBUICOES
             #-----------------------------------------------------
-            ph_contrib_msg.info(f"Importando SPED Contribuições ({len(contrib_files)} arquivo(s))…")
+            ph_contrib_msg.info(f"Importando SPED Contribuições ({len(uploaded_contrib_file)} arquivo(s))…")
             ph_contrib_prog.progress(10, text="Lendo SPED Contribuições…")
 
             # Process the files
-            df_contrib = load_and_process_data(contrib_files)
+            df_contrib = load_and_process_data(uploaded_contrib_file)
             ph_contrib_prog.progress(100, text="SPED Contribuições importado com sucesso.")
             ph_contrib_msg.success(":material/task_alt: SPED Contribuições concluído")
 
@@ -612,16 +577,16 @@ if selected_area == "Área 1: Importar Arquivos SPED":
             #-----------------------------------------------------
             # importar ECD
             #-----------------------------------------------------
-            if ecd_files and len(ecd_files) > 0:
-                ph_ecd_msg.info(f"Importando ECD ({len(ecd_files)} arquivo(s))…")
+            if uploaded_sped_ecd_file and len(uploaded_sped_ecd_file) > 0:
+                ph_ecd_msg.info(f"Importando ECD ({len(uploaded_sped_ecd_file)} arquivo(s))…")
                 ph_ecd_prog.progress(10, text="Lendo ECD…")
             else:
                 ph_ecd_prog.progress(100, text="Nenhum arquivo ECD selecionado.")
                 ph_ecd_msg.warning("ECD não informado — etapa ignorada.")
 
             # Process the files (only if ECD provided)
-            if ecd_files and len(ecd_files) > 0:
-                df_ecd = load_and_process_ecd(ecd_files)
+            if uploaded_sped_ecd_file and len(uploaded_sped_ecd_file) > 0:
+                df_ecd = load_and_process_ecd(uploaded_sped_ecd_file)
                 ph_ecd_prog.progress(100, text="ECD importado com sucesso.")
                 ph_ecd_msg.success(":material/task_alt: ECD concluído")
 
@@ -680,6 +645,29 @@ if selected_area == "Área 1: Importar Arquivos SPED":
 
             st.toast("✅ Importação concluída.")
             #st.success("Arquivos importados e processados com sucesso!")
+
+            # Add successfully processed files to registry
+            added_files = []
+
+            # Add SPED Fiscal files
+            fiscal_added, fiscal_skipped = add_files_to_registry(uploaded_sped_fiscal_files, 'fiscal')
+            if fiscal_added:
+                added_files.extend([f"SPED Fiscal: {f}" for f in fiscal_added])
+
+            # Add SPED Contribuições files
+            contrib_added, contrib_skipped = add_files_to_registry(uploaded_contrib_file, 'contrib')
+            if contrib_added:
+                added_files.extend([f"SPED Contrib.: {f}" for f in contrib_added])
+
+            # Add ECD files if provided
+            if uploaded_sped_ecd_file:
+                ecd_added, ecd_skipped = add_files_to_registry(uploaded_sped_ecd_file, 'ecd')
+                if ecd_added:
+                    added_files.extend([f"ECD: {f}" for f in ecd_added])
+
+            # Show success message with added files
+            if added_files:
+                st.success(f"✅ Arquivos processados e adicionados ao histórico:\n" + "\n".join(f"• {f}" for f in added_files))
             st.header(f"Empresa: {empresa}")
             st.subheader(f"CNPJ: {raiz_cnpj[:2]}.{raiz_cnpj[2:5]}.{raiz_cnpj[5:8]}/{raiz_cnpj[8:12]}-{raiz_cnpj[-2:]}")
             #st.info("Dados já processados. Abaixo você pode ir para o Cenário Atual ou Reforma Tributária.")

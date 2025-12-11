@@ -1350,6 +1350,13 @@ elif selected_area == "Área 5: Reforma Tributária":
     # ensure numeric
     df_REG_I355_ECD['VL_CTA'] = pd.to_numeric(df_REG_I355_ECD['VL_CTA'], errors='coerce')
 
+    # Make debit values negative (D = expenses, C = revenues)
+    df_REG_I355_ECD['VL_CTA'] = np.where(
+        df_REG_I355_ECD['IND_DC'] == 'D',
+        -df_REG_I355_ECD['VL_CTA'],
+        df_REG_I355_ECD['VL_CTA']
+    )
+
     # seed CREDITAVEL from your reference list
     df_REG_I355_ECD['CREDITAVEL'] = np.where(
         df_REG_I355_ECD['CTA_REF'].isin(cta_ref_creditavel),

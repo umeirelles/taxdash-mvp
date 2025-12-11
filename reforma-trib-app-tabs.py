@@ -67,13 +67,14 @@ def extract_file_metadata(file_obj, file_type):
     parts = first_line.split('|')
 
     # Period and CNPJ positions vary by file type
+    # Date format in SPED: DDMMYYYY
     if file_type == 'ecd':
         # ECD: |0000|LECD|...|DT_INI|DT_FIM|...|CNPJ|...
-        periodo = f"{parts[4][-2:]}/{parts[4][:4]}" if len(parts) > 4 else "N/A"
+        periodo = f"{parts[4][2:4]}/{parts[4][4:8]}" if len(parts) > 4 and len(parts[4]) >= 8 else "N/A"
         cnpj = parts[7] if len(parts) > 7 else "N/A"
     else:
         # SPED Contrib/Fiscal: |0000|...|DT_INI|DT_FIM|...|CNPJ|...
-        periodo = f"{parts[4][-2:]}/{parts[4][:4]}" if len(parts) > 4 else "N/A"
+        periodo = f"{parts[4][2:4]}/{parts[4][4:8]}" if len(parts) > 4 and len(parts[4]) >= 8 else "N/A"
         cnpj = parts[8] if len(parts) > 8 else "N/A"
 
     file_obj.seek(0)  # Reset for later processing
@@ -138,52 +139,45 @@ def render_file_dashboard():
     if total_files == 0:
         return  # No files yet, don't show dashboard
 
-    st.markdown("### 📁 Arquivos Carregados")
-
-    # Summary row
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    # Compact summary with clear button
+    col1, col2 = st.columns([3, 1])
     with col1:
-        st.metric("ECD", len(registry['ecd']))
+        counts = f"ECD: {len(registry['ecd'])} | SPED Contrib.: {len(registry['contrib'])} | SPED Fiscal: {len(registry['fiscal'])}"
+        st.caption(f"📁 **Arquivos Carregados** — {counts}")
     with col2:
-        st.metric("SPED Contrib.", len(registry['contrib']))
-    with col3:
-        st.metric("SPED Fiscal", len(registry['fiscal']))
-    with col4:
-        if st.button("🗑️ Limpar Tudo", type="secondary"):
+        if st.button("🗑️ Limpar", type="secondary", key="clear_all"):
             clear_file_registry()
             st.rerun()
 
-    # File table
-    all_files = []
-    for tipo, files in registry.items():
-        for f in files:
-            all_files.append({
-                'Tipo': f['tipo'].upper(),
-                'Arquivo': f['name'][:30] + '...' if len(f['name']) > 30 else f['name'],
-                'Período': f['periodo'],
-                'CNPJ': f['cnpj'][:14] + '...' if len(f['cnpj']) > 14 else f['cnpj'],
-                '_id': f['id'],
-                '_tipo': tipo
-            })
+    # File list in expander
+    with st.expander("Ver detalhes dos arquivos", expanded=False):
+        all_files = []
+        for tipo, files in registry.items():
+            for f in files:
+                all_files.append({
+                    'Tipo': f['tipo'].upper(),
+                    'Arquivo': f['name'][:25] + '...' if len(f['name']) > 25 else f['name'],
+                    'Período': f['periodo'],
+                    'CNPJ': f['cnpj'][:12] + '...' if len(f['cnpj']) > 12 else f['cnpj'],
+                    '_id': f['id'],
+                    '_tipo': tipo
+                })
 
-    if all_files:
-        # Display as dataframe with remove buttons
-        for i, f in enumerate(all_files):
-            col1, col2, col3, col4, col5 = st.columns([2, 3, 1.5, 2, 0.5])
-            with col1:
-                st.text(f['Tipo'])
-            with col2:
-                st.text(f['Arquivo'])
-            with col3:
-                st.text(f['Período'])
-            with col4:
-                st.text(f['CNPJ'])
-            with col5:
-                if st.button("🗑️", key=f"del_{f['_id']}", help="Remover arquivo"):
-                    remove_file_from_registry(f['_id'], f['_tipo'])
-                    st.rerun()
-
-    st.markdown("---")
+        if all_files:
+            for i, f in enumerate(all_files):
+                col1, col2, col3, col4, col5 = st.columns([1.5, 2.5, 1, 1.5, 0.5])
+                with col1:
+                    st.caption(f['Tipo'])
+                with col2:
+                    st.caption(f['Arquivo'])
+                with col3:
+                    st.caption(f['Período'])
+                with col4:
+                    st.caption(f['CNPJ'])
+                with col5:
+                    if st.button("✕", key=f"del_{f['_id']}", help="Remover"):
+                        remove_file_from_registry(f['_id'], f['_tipo'])
+                        st.rerun()
 
 
 # --------------------------------------------------------------------------------------------------------------------

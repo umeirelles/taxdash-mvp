@@ -16,6 +16,28 @@ pd.set_option('future.no_silent_downcasting', True)
 st.set_page_config(page_title="TaxDash", page_icon=":material/code:", layout="wide")
 
 
+# --------------------------------------------------------------------------------------------------------------------
+# HELPER FUNCTIONS FOR TABLE DISPLAY AND DOWNLOAD
+# --------------------------------------------------------------------------------------------------------------------
+
+@st.cache_data
+def convert_df_to_csv(df):
+    """Cache CSV conversion to avoid regenerating on every rerun."""
+    return df.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+
+def display_table_with_download(df, filename, max_rows=1000):
+    """Display table with row limit and cached download button."""
+    total_rows = len(df)
+
+    if total_rows > max_rows:
+        st.warning(f"⚠️ Exibindo {max_rows:,} de {total_rows:,} linhas. Baixe o CSV para dados completos.")
+        st.dataframe(df.head(max_rows), hide_index=True)
+    else:
+        st.dataframe(df, hide_index=True)
+
+    csv = convert_df_to_csv(df)
+    st.download_button("📥 Baixar CSV", csv, filename, "text/csv")
+
 
 # layout dos datadrames
 def style_df(df):
@@ -555,7 +577,7 @@ elif selected_area == "Área 2: Compras/Entradas":
         if not df_receitas_sem_debito.empty:
             on = st.toggle("_Ver detalhamento das 'Receitas Não Tributadas'_", key="toggle_receitas_nao_tributadas")
             if on:
-                st.dataframe(df_receitas_sem_debito, hide_index=True, use_container_width=False)
+                display_table_with_download(df_receitas_sem_debito, "receitas_nao_tributadas.csv")
 
 
         bc_pis_cofins = df_receitas_com_debito['3'].sum()
@@ -564,7 +586,7 @@ elif selected_area == "Área 2: Compras/Entradas":
         if not df_receitas_com_debito.empty:
             on = st.toggle("_Ver detalhamento da 'Receitas Tributadas'_", key="toggle_receitas_tributadas")
             if on:
-                st.dataframe(df_receitas_com_debito, hide_index=True, use_container_width=False)
+                display_table_with_download(df_receitas_com_debito, "receitas_tributadas.csv")
 
         debito_pis_cofins = df_receitas_com_debito['11'].sum() + df_receitas_com_debito['valor_cofins'].sum()     
         st.write("**Débito Total de PIS/Cofins no período:**", f"R$ {debito_pis_cofins:,.2f}")
@@ -590,7 +612,7 @@ elif selected_area == "Área 2: Compras/Entradas":
                 on = st.toggle("_Ver detalhamento por 'Tipo de Crédito' escriturado_", key="toggle_credito_por_tipo")
                 if on:
                     # Create a styled DataFrame
-                    st.dataframe(df_cred_por_tipo_all, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_cred_por_tipo_all, "credito_por_tipo.csv")
 
     
 
@@ -599,9 +621,9 @@ elif selected_area == "Área 2: Compras/Entradas":
                 on = st.toggle("_Ver detalhamento dos 'Ajustes no Crédito'_", key="toggle_ajustes_credito")
                 if on:
                     st.write("Lançamentos de PIS")
-                    st.dataframe(df_ajuste_acresc_pis, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_ajuste_acresc_pis, "ajustes_pis.csv")
                     st.write("Lançamentos de COFINS")
-                    st.dataframe(df_ajuste_acresc_cofins, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_ajuste_acresc_cofins, "ajustes_cofins.csv")
 
             st.write("**Crédito Total de PIS/Cofins no período:**", f"R$ {cred_total:,.2f}")
 
@@ -647,7 +669,7 @@ elif selected_area == "Área 2: Compras/Entradas":
         st.write(f"**CNPJ:** {raiz_cnpj[:2]}.{raiz_cnpj[2:5]}.{raiz_cnpj[5:8]}/{raiz_cnpj[8:12]}-{raiz_cnpj[-2:]}")
         st.divider()
 
-        st.dataframe(df_C170_COMPRA_por_item_cfop_cst_aliq_ncm, hide_index=True, use_container_width=False)
+        display_table_with_download(df_C170_COMPRA_por_item_cfop_cst_aliq_ncm, "compras_por_item.csv")
 
     # ---------------------------------------------------------------------------------------------
 
@@ -750,18 +772,18 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foi declarado nenhum CFOP de Venda.")
         else:
             st.write('*Obs.: Foram considerados apenas CFOPs de Venda.*')
-            st.dataframe(df_final_venda_por_cfop, hide_index=True, use_container_width=False)
+            display_table_with_download(df_final_venda_por_cfop, "vendas_por_cfop.csv")
         st.write('\n')
         st.write('\n')
-        
-        
+
+
 
         st.header("3) Vendas por NCM")
         if df_C170_venda_por_ncm.empty:
             st.warning("Não foi declarada a NCM de nenhum item vendido.")
         else:
             st.write('*Obs.: NFC-e não possuem detalhamento por NCM.*')
-            st.dataframe(df_C170_venda_por_ncm, hide_index=True, use_container_width=False)
+            display_table_with_download(df_C170_venda_por_ncm, "vendas_por_ncm.csv")
         st.write('\n')
         st.write('\n')
 
@@ -770,8 +792,8 @@ elif selected_area == "Área 3: Vendas/Saídas":
         if df_final_venda_por_estab.empty:
             st.warning("Não foram declaradas as vendas por Estabelecimento.")
         else:
-            st.write('*Obs.: A tabela abaixo inclui as vendas de NF-e (Mod 55) e NFC-e (Mod 65).*') 
-            st.dataframe(df_final_venda_por_estab, hide_index=True, use_container_width=False)
+            st.write('*Obs.: A tabela abaixo inclui as vendas de NF-e (Mod 55) e NFC-e (Mod 65).*')
+            display_table_with_download(df_final_venda_por_estab, "vendas_por_estab.csv")
         st.write('\n')
         st.write('\n')
 
@@ -781,7 +803,7 @@ elif selected_area == "Área 3: Vendas/Saídas":
             st.warning("Não foram declaradas as vendas por UF dos Estabelecimentos.")
         else:
             st.write('*Obs.: A tabela abaixo inclui as vendas de NF-e (Mod 55) e NFC-e (Mod 65).*')
-            st.dataframe(df_final_venda_por_uf_estab, hide_index=True, use_container_width=False)
+            display_table_with_download(df_final_venda_por_uf_estab, "vendas_por_uf_estab.csv")
         st.write('\n')
         st.write('\n')
 
@@ -855,7 +877,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor PIS/Cofins:**", f"R$ {(vlr_pis_serv_tom + vlr_cofins_serv_tom):,.2f}")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que geraram créditos'_", key="toggle_serv_tom_com_cred")
                 if on:
-                    st.dataframe(df_serv_tomados_com_cred, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_serv_tomados_com_cred, "servicos_tomados_com_credito.csv")
                 st.write('\n')
                 st.write('\n')
                 
@@ -870,7 +892,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor Total de Serviços Tomados sem crédito:**", f"R$ {vlr_total_serv_tom_sem_cred:,.2f}", f"({(vlr_total_serv_tom_sem_cred/vlr_total_serv_tom*100):.0f}% do total)")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que não geraram créditos'_", key="toggle_serv_tom_sem_cred")
                 if on:
-                    st.dataframe(df_serv_tomados_sem_cred, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_serv_tomados_sem_cred, "servicos_tomados_sem_credito.csv")
 
 
     # ---------------------------------------------------------------------------------------------
@@ -909,10 +931,10 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor PIS/Cofins:**", f"R$ {(vlr_pis_serv_com_tributo + vlr_cofins_serv_com_tributo):,.2f}")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que geraram déditos'_", key="toggle_serv_prest_com_debito")
                 if on:
-                    st.dataframe(df_serv_prest_com_tribut, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_serv_prest_com_tribut, "servicos_prestados_com_debito.csv")
                 st.write('\n')
                 st.write('\n')
-                
+
             if df_serv_prest_sem_tribut.empty:
                 st.subheader("2.2) Serviços sem Dédito")
                 st.warning("Não foi declarado nenhum serviço sem débito de PIS/Cofins.")
@@ -923,7 +945,7 @@ elif selected_area == "Área 4: Serviços":
                 st.write("**Valor Total de Serviços Prestados sem dédito:**", f"R$ {vlr_serv_sem_tributo:,.2f}", f"({(vlr_serv_sem_tributo/vlr_serv_prest*100):.0f}% do total)")
                 on = st.toggle("_Ver detalhamento dos 'Serviços que não geraram déditos'_", key="toggle_serv_prest_sem_debito")
                 if on:
-                    st.dataframe(df_serv_prest_sem_tribut, hide_index=True, use_container_width=False)
+                    display_table_with_download(df_serv_prest_sem_tribut, "servicos_prestados_sem_debito.csv")
 
 
 
@@ -1029,37 +1051,17 @@ elif selected_area == "Área 5: Reforma Tributária":
     # -------------------------------------------------------------------
     st.subheader("**> Resumo por CFOPs de Venda**")
     df_C170_SF_cfop = df_saidas_reforma[df_saidas_reforma['cfop_descr'].str.lower().fillna('').str.startswith("venda de")].groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_cfop, hide_index=True, use_container_width=False)
+    display_table_with_download(df_C170_SF_cfop, "resumo_cfop_venda.csv")
 
     # -------------------------------------------------------------------
     st.subheader("**> Base de Vendas (NCMxCFOPxCSTxALIQ)**")
     df_vendas_reforma = df_saidas_reforma[df_saidas_reforma['cfop_descr'].str.lower().fillna('').str.startswith("venda de")].groupby(['uf_empresa','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_vendas_reforma, hide_index=True, use_container_width=False)
+    display_table_with_download(df_vendas_reforma, "base_vendas_reforma.csv")
 
     # -------------------------------------------------------------------
     st.subheader("> Base Completa de Saídas")
-    total_rows = len(df_saidas_reforma)
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.write(f"Total de registros: {total_rows:,}")
-    with col2:
-        # Download button for complete data (Brazilian CSV format: semicolon separator, comma decimal)
-        csv_saidas = df_saidas_reforma.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-        st.download_button(
-            label="📥 Baixar tabela completa (CSV)",
-            data=csv_saidas,
-            file_name="base_completa_saidas.csv",
-            mime="text/csv",
-        )
-
-    # Display only first 10,000 rows to avoid MessageSizeError
-    max_display = 10000
-    if total_rows > max_display:
-        st.warning(f"⚠️ Exibindo apenas as primeiras {max_display:,} linhas de {total_rows:,} registros para evitar sobrecarga. Use o botão acima para baixar todos os dados.")
-        st.dataframe(df_saidas_reforma.head(max_display), hide_index=True, use_container_width=False)
-    else:
-        st.dataframe(df_saidas_reforma, hide_index=True, use_container_width=False)
+    st.write(f"Total de registros: {len(df_saidas_reforma):,}")
+    display_table_with_download(df_saidas_reforma, "base_completa_saidas.csv")
     
     st.divider()
 
@@ -1082,12 +1084,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     st.markdown('#####')
 
     if not df_vendas_prod_reforma.empty:
-        st.dataframe(df_vendas_prod_reforma_por_cfop, 
-                     hide_index=True, 
-                     use_container_width=False, 
-                     column_config={
-                        "VL_ITEM": st.column_config.NumberColumn("Valor", format="%.2f")
-                    })
+        display_table_with_download(df_vendas_prod_reforma_por_cfop, "venda_producao_propria.csv")
         st.markdown('#####')
 
 
@@ -1155,7 +1152,7 @@ elif selected_area == "Área 5: Reforma Tributária":
 
 
     if not df_vendas_prod_reforma.empty:
-        st.dataframe(df_reforma_revendas, hide_index=True, use_container_width=False)
+        display_table_with_download(df_reforma_revendas, "revendas.csv")
         st.markdown('#####')
 
             
@@ -1243,7 +1240,7 @@ elif selected_area == "Área 5: Reforma Tributária":
     st.markdown('#####')
 
     if not df_vendas_prod_reforma.empty:
-        st.dataframe(df_serv_prestados, hide_index=True, use_container_width=False)
+        display_table_with_download(df_serv_prestados, "servicos_prestados_reforma.csv")
         st.markdown('#####')
     
 
@@ -1301,38 +1298,18 @@ elif selected_area == "Área 5: Reforma Tributária":
     # -------------------------------------------------------------------
     st.subheader("**2.1) Base de Entradas C170 Sped Fiscal (apenas CFOP de compra)**")
     df_C170_SF_compras = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")]
-    total_rows_compras = len(df_C170_SF_compras)
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.write(f"Total de registros: {total_rows_compras:,}")
-    with col2:
-        # Download button for complete data (Brazilian CSV format: semicolon separator, comma decimal)
-        csv_compras = df_C170_SF_compras.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-        st.download_button(
-            label="📥 Baixar tabela completa (CSV)",
-            data=csv_compras,
-            file_name="base_completa_compras.csv",
-            mime="text/csv",
-        )
-
-    # Display only first 10,000 rows to avoid MessageSizeError
-    max_display = 10000
-    if total_rows_compras > max_display:
-        st.warning(f"⚠️ Exibindo apenas as primeiras {max_display:,} linhas de {total_rows_compras:,} registros para evitar sobrecarga. Use o botão acima para baixar todos os dados.")
-        st.dataframe(df_C170_SF_compras.head(max_display), hide_index=True, use_container_width=False)
-    else:
-        st.dataframe(df_C170_SF_compras, hide_index=True, use_container_width=False)
+    st.write(f"Total de registros: {len(df_C170_SF_compras):,}")
+    display_table_with_download(df_C170_SF_compras, "base_completa_compras.csv")
 
     # -------------------------------------------------------------------
     st.subheader("**2.2) Compras (NCMxCFOPxCSTxALIQ)**")
     df_C170_SF_por_ncm_cfop_cst = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['uf_estab','part_uf','CFOP', 'cfop_descr','ncm', 'CST_ICMS', 'ALIQ_ICMS','CST_PIS','ALIQ_PIS','ALIQ_COFINS'], dropna=False)[['VL_ITEM', 'VL_DESC', 'VL_ICMS', 'VL_ICMS_ST', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_por_ncm_cfop_cst, hide_index=True, use_container_width=False)
+    display_table_with_download(df_C170_SF_por_ncm_cfop_cst, "compras_ncm_cfop_cst.csv")
 
     # -------------------------------------------------------------------
     st.subheader("**2.3) Resumo por CFOPs de Compra**")
     df_C170_SF_cfop = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['CFOP', 'cfop_descr'], dropna=False)[['VL_ITEM', 'VL_ICMS', 'VL_IPI', 'VL_PIS', 'VL_COFINS']].sum().round(2).sort_values(by='VL_ITEM', ascending=False).reset_index()
-    st.dataframe(df_C170_SF_cfop, hide_index=True, use_container_width=False)
+    display_table_with_download(df_C170_SF_cfop, "resumo_cfop_compra.csv")
 
     # -------------------------------------------------------------------
     st.subheader("2.4) Bloco M")
@@ -1344,17 +1321,17 @@ elif selected_area == "Área 5: Reforma Tributária":
     else:
         st.write("**Valor Base do Crédito:**", f"R$ {cred_bc_total:,.2f}")
         st.write("**Crédito Total de PIS/Cofins no período:**", f"R$ {cred_total:,.2f}")
-        st.dataframe(df_cred_por_tipo_all, hide_index=True, use_container_width=False)
+        display_table_with_download(df_cred_por_tipo_all, "credito_por_tipo_reforma.csv")
 
 
     if not df_ajuste_acresc_pis.empty:
         st.write("**Lançamentos de Ajuste no Crédito:**", f"R$ {(vlr_ajuste_acresc_pis + vlr_ajuste_acresc_cofins):,.2f}")
-        on = st.toggle("_Ver detalhamento dos 'Ajustes no Crédito'_", key="toggle_ajustes_credito")
+        on = st.toggle("_Ver detalhamento dos 'Ajustes no Crédito'_", key="toggle_ajustes_credito_reforma")
         if on:
             st.write("Lançamentos de PIS")
-            st.dataframe(df_ajuste_acresc_pis, hide_index=True, use_container_width=False)
+            display_table_with_download(df_ajuste_acresc_pis, "ajustes_pis_reforma.csv")
             st.write("Lançamentos de COFINS")
-            st.dataframe(df_ajuste_acresc_cofins, hide_index=True, use_container_width=False)
+            display_table_with_download(df_ajuste_acresc_cofins, "ajustes_cofins_reforma.csv")
 
 
     

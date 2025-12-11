@@ -175,6 +175,10 @@ def Bloco_C(df, reg_0140, reg_0150, reg_0200, cfop_cod_descr, cod_uf, cst_pis_co
         if not reg_0200.empty:
             C170.insert(7, 'ncm', C170['3'].map(reg_0200.set_index('2')['8']))       # incluido a NCM
             C170.insert(7, 'item_descr', C170['3'].map(reg_0200.set_index('2')['3']))       # incluido a DESCR_ITEM
+        else:
+            C170.insert(7, 'ncm', None)
+            C170.insert(7, 'item_descr', None)
+        # Always add these columns - downstream code expects them
         if not C100.empty:
             C100_idx = C100.set_index('id')
             C170.insert(4, 'mod_nf', C170['id_pai'].map(C100_idx['5']))       # incluido o Modelo da NF
@@ -182,16 +186,29 @@ def Bloco_C(df, reg_0140, reg_0150, reg_0200, cfop_cod_descr, cod_uf, cst_pis_co
             C170.insert(4, 'ind_oper', C170['id_pai'].map(C100_idx['2']))       # incluido o IND_OPER (0-entrada; 1-saida)
             C170.insert(4, 'part_cod', C170['id_pai'].map(C100_idx['4']))       # incluido COD_PART
             C170.insert(13, 'chave_nf', C170['id_pai'].map(C100_idx['9']))       # incluido a CHAVE_NF
+        else:
+            C170.insert(4, 'mod_nf', None)
+            C170.insert(4, 'ind_emit', None)
+            C170.insert(4, 'ind_oper', None)
+            C170.insert(4, 'part_cod', None)
+            C170.insert(13, 'chave_nf', None)
         if not reg_0150.empty:
             reg_0150_idx = reg_0150.set_index('2')
             C170.insert(5, 'part_nome', C170['part_cod'].map(reg_0150_idx['3']))       # incluido a Descrição do Participante
             C170.insert(5, 'part_cnpj', C170['part_cod'].map(reg_0150_idx['5']))       # incluido o CNPJ do Participante
             C170.insert(5, 'part_uf_cod', C170['part_cod'].map(reg_0150_idx['8'].astype(str).str[:2]))       # incluido a UF do Participante
             C170.insert(5, 'part_ie', C170['part_cod'].map(reg_0150_idx['7']))       # incluido a IE do Participante
+        else:
+            C170.insert(5, 'part_nome', None)
+            C170.insert(5, 'part_cnpj', None)
+            C170.insert(5, 'part_uf_cod', None)
+            C170.insert(5, 'part_ie', None)
         C170.insert(6, 'part_uf', C170['part_uf_cod'].map(cod_uf))
         C170.drop('part_uf_cod', axis=1, inplace=True)
         if not reg_0140.empty:
             C170.insert(4, 'uf_empresa', C170['cnpj'].map(reg_0140.set_index('4')['5']))       # incluido a UF da Empresa em análise
+        else:
+            C170.insert(4, 'uf_empresa', None)
 
     ###  C175
     C175 = _get_register_group(groups, 'C175', columns=22)
@@ -199,15 +216,25 @@ def Bloco_C(df, reg_0140, reg_0150, reg_0200, cfop_cod_descr, cod_uf, cst_pis_co
         C175 = _replace_comma_decimal(C175, ['3', '4', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16'])
         C175[['3', '4', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16']] = C175[['3', '4', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16']].apply(pd.to_numeric, errors='coerce')
         C175.insert(6, 'cfop_descr', C175['2'].map(cfop_cod_descr))     # incluido a descrição do CFOP
+        # Always add these columns (with NaN if parent is empty) - downstream code expects them
         if not C100.empty:
             C100_idx = C100.set_index('id')
             C175.insert(4, 'mod_nf', C175['id_pai'].map(C100_idx['5']))       # incluido o Modelo da NF
             C175.insert(4, 'ind_emit', C175['id_pai'].map(C100_idx['3']))       # incluido o IND_EMIT (0-propria; 1-terceiros)
             C175.insert(4, 'ind_oper', C175['id_pai'].map(C100_idx['2']))       # incluido o IND_OPER (0-entrada; 1-saida)
+        else:
+            # Add columns with NaN if C100 is empty
+            C175.insert(4, 'mod_nf', None)
+            C175.insert(4, 'ind_emit', None)
+            C175.insert(4, 'ind_oper', None)
         if not reg_0140.empty:
             reg_0140_idx = reg_0140.set_index('4')
             C175.insert(4, 'uf_empresa', C175['cnpj'].map(reg_0140_idx['5']))       # incluido a UF da Empresa em análise
             C175.insert(4, 'cidade_estab', C175['cnpj'].map(reg_0140_idx['7']))       # incluido a cidade do estabelecimento
+        else:
+            # Add columns with NaN if reg_0140 is empty
+            C175.insert(4, 'uf_empresa', None)
+            C175.insert(4, 'cidade_estab', None)
 
     ### C181
     C181 = _get_register_group(groups, 'C181', columns=15)
@@ -589,35 +616,41 @@ def bloco_M_filtering(M105, M110, M210, M400, M510, M610, tab_4_3_7):
 
 def bloco_A_filtering(A100, A170):
     """Filter and analyze A-block data for services."""
-    df_serv_tomados = A170[A170['ind_oper'] == '0'].groupby(['ind_oper','3', 'descr_serv_0200', '9', '11', '15'], dropna=False)[['5', '10', '12', '16', 'iss']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
-    df_serv_tomados['IBS'] = 0
-    df_serv_tomados['CBS'] = 0
-    df_serv_tomados = df_serv_tomados.rename(columns={
-        "3":"cod_serv",
-        "descr_serv_0200":"descricao_servico",
-        "9":"cst_pis_cofins",
-        "11":"pis_aliq",
-        "15":"cofins_aliq",
-        "5":"vlr_servico",
-        "10":"pis_cofins_bc",
-        "12":"pis_vlr",
-        "16":"cofins_vlr"
-    })
+    if not A170.empty and 'ind_oper' in A170.columns and 'descr_serv_0200' in A170.columns:
+        df_serv_tomados = A170[A170['ind_oper'] == '0'].groupby(['ind_oper','3', 'descr_serv_0200', '9', '11', '15'], dropna=False)[['5', '10', '12', '16', 'iss']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
+        df_serv_tomados['IBS'] = 0
+        df_serv_tomados['CBS'] = 0
+        df_serv_tomados = df_serv_tomados.rename(columns={
+            "3":"cod_serv",
+            "descr_serv_0200":"descricao_servico",
+            "9":"cst_pis_cofins",
+            "11":"pis_aliq",
+            "15":"cofins_aliq",
+            "5":"vlr_servico",
+            "10":"pis_cofins_bc",
+            "12":"pis_vlr",
+            "16":"cofins_vlr"
+        })
+    else:
+        df_serv_tomados = pd.DataFrame(columns=['ind_oper', 'cod_serv', 'descricao_servico', 'cst_pis_cofins', 'pis_aliq', 'cofins_aliq', 'vlr_servico', 'pis_cofins_bc', 'pis_vlr', 'cofins_vlr', 'iss', 'IBS', 'CBS'])
 
-    df_serv_prestados = A170[A170['ind_oper'] == '1'].groupby(['ind_oper','3', 'descr_serv_0200', '9', '11', '15'], dropna=False)[['5', '10', '12', '16', 'iss']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
-    df_serv_prestados['IBS'] = 0
-    df_serv_prestados['CBS'] = 0
-    df_serv_prestados = df_serv_prestados.rename(columns={
-        "3":"cod_serv",
-        "descr_serv_0200":"descricao_servico",
-        "9":"cst_pis_cofins",
-        "11":"pis_aliq",
-        "15":"cofins_aliq",
-        "5":"vlr_servico",
-        "10":"pis_cofins_bc",
-        "12":"pis_vlr",
-        "16":"cofins_vlr"
-    })
+    if not A170.empty and 'ind_oper' in A170.columns and 'descr_serv_0200' in A170.columns:
+        df_serv_prestados = A170[A170['ind_oper'] == '1'].groupby(['ind_oper','3', 'descr_serv_0200', '9', '11', '15'], dropna=False)[['5', '10', '12', '16', 'iss']].sum().round(2).sort_values(by='5', ascending=False).reset_index()
+        df_serv_prestados['IBS'] = 0
+        df_serv_prestados['CBS'] = 0
+        df_serv_prestados = df_serv_prestados.rename(columns={
+            "3":"cod_serv",
+            "descr_serv_0200":"descricao_servico",
+            "9":"cst_pis_cofins",
+            "11":"pis_aliq",
+            "15":"cofins_aliq",
+            "5":"vlr_servico",
+            "10":"pis_cofins_bc",
+            "12":"pis_vlr",
+            "16":"cofins_vlr"
+        })
+    else:
+        df_serv_prestados = pd.DataFrame(columns=['ind_oper', 'cod_serv', 'descricao_servico', 'cst_pis_cofins', 'pis_aliq', 'cofins_aliq', 'vlr_servico', 'pis_cofins_bc', 'pis_vlr', 'cofins_vlr', 'iss', 'IBS', 'CBS'])
 
 
     return df_serv_tomados, df_serv_prestados
@@ -625,71 +658,110 @@ def bloco_A_filtering(A100, A170):
 
 def bloco_C_filtering(C100, C170, C175, C181, C185):
     """Filter and analyze C-block data for sales."""
-    df_C170_saidas = C170[(C170['ind_oper'] == '1') & (C170['cfop_descr'].str.lower().fillna('').str.startswith("venda"))]
+    if not C170.empty and 'ind_oper' in C170.columns and 'cfop_descr' in C170.columns:
+        df_C170_saidas = C170[(C170['ind_oper'] == '1') & (C170['cfop_descr'].str.lower().fillna('').str.startswith("venda"))]
+    else:
+        df_C170_saidas = pd.DataFrame()
 
 
 
     # NF-e MOD 55
-    df_C170_por_mod55_aliq = C170.groupby(['ind_oper', 'mod_nf', '27', '33'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+    if not C170.empty and 'ind_oper' in C170.columns:
+        df_C170_por_mod55_aliq = C170.groupby(['ind_oper', 'mod_nf', '27', '33'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+    else:
+        df_C170_por_mod55_aliq = pd.DataFrame(columns=['ind_oper', 'mod_nf', '27', '33', '7', '26', '30', '36'])
 
     # C170
-    df_C170_COMPRA_por_item_cfop_cst_aliq_ncm = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['3', 'item_descr', '11', 'cfop_descr', 'uf_empresa', 'part_uf', '25', '27', 'ncm'], dropna=False)[['7', '26', '30']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
-    df_C170_venda_por_ncm = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby('ncm', dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+    if not C170.empty and 'cfop_descr' in C170.columns:
+        df_C170_COMPRA_por_item_cfop_cst_aliq_ncm = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("compra")].groupby(['3', 'item_descr', '11', 'cfop_descr', 'uf_empresa', 'part_uf', '25', '27', 'ncm'], dropna=False)[['7', '26', '30']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+        df_C170_venda_por_ncm = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby('ncm', dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+    else:
+        df_C170_COMPRA_por_item_cfop_cst_aliq_ncm = pd.DataFrame(columns=['3', 'item_descr', '11', 'cfop_descr', 'uf_empresa', 'part_uf', '25', '27', 'ncm', '7', '26', '30'])
+        df_C170_venda_por_ncm = pd.DataFrame(columns=['ncm', '7', '26', '30', '36'])
 
     # NFC-e MOD 65
-    df_C175_por_mod65_aliq = C175.groupby(['ind_oper', 'mod_nf', '7', '13'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
+    # Check if C175 is empty or missing required columns (some SPED files don't have C175)
+    if not C175.empty and 'ind_oper' in C175.columns:
+        df_C175_por_mod65_aliq = C175.groupby(['ind_oper', 'mod_nf', '7', '13'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
+    else:
+        # Create empty DataFrame with expected structure
+        df_C175_por_mod65_aliq = pd.DataFrame(columns=['ind_oper', 'mod_nf', '7', '13', '3', '6', '10', '16'])
 
     # tabela_venda_por_estab
-    df_C170_venda_por_estab = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby(['uf_empresa', 'cnpj'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
-    df_C170_venda_por_estab = df_C170_venda_por_estab.rename(columns={
-        'uf_empresa': 'uf_empresa',
-        'cnpj': 'cnpj',
-        '7': 'valor_opr',
-        '26': 'bc',
-        '30': 'vlr_pis',
-        '36': 'vlr_cofins'
-    })
+    if not C170.empty and 'cfop_descr' in C170.columns and 'uf_empresa' in C170.columns:
+        df_C170_venda_por_estab = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby(['uf_empresa', 'cnpj'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+        df_C170_venda_por_estab = df_C170_venda_por_estab.rename(columns={
+            'uf_empresa': 'uf_empresa',
+            'cnpj': 'cnpj',
+            '7': 'valor_opr',
+            '26': 'bc',
+            '30': 'vlr_pis',
+            '36': 'vlr_cofins'
+        })
+    else:
+        df_C170_venda_por_estab = pd.DataFrame(columns=['uf_empresa', 'cnpj', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
 
-    df_C175_venda_por_estab = C175.groupby(['uf_empresa', 'cnpj'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
-    df_C175_venda_por_estab = df_C175_venda_por_estab.rename(columns={
-        'uf_empresa': 'uf_empresa',
-        'cnpj': 'cnpj',
-        '3': 'valor_opr',
-        '6': 'bc',
-        '10': 'vlr_pis',
-        '16': 'vlr_cofins'
-    })
+    if not C175.empty and 'uf_empresa' in C175.columns and 'cnpj' in C175.columns:
+        df_C175_venda_por_estab = C175.groupby(['uf_empresa', 'cnpj'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
+        df_C175_venda_por_estab = df_C175_venda_por_estab.rename(columns={
+            'uf_empresa': 'uf_empresa',
+            'cnpj': 'cnpj',
+            '3': 'valor_opr',
+            '6': 'bc',
+            '10': 'vlr_pis',
+            '16': 'vlr_cofins'
+        })
+    else:
+        df_C175_venda_por_estab = pd.DataFrame(columns=['uf_empresa', 'cnpj', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
 
     df_final_venda_por_estab = pd.concat([df_C170_venda_por_estab, df_C175_venda_por_estab], ignore_index=True)
-    df_final_venda_por_estab = df_final_venda_por_estab.groupby(['uf_empresa', 'cnpj'], dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    if not df_final_venda_por_estab.empty and 'uf_empresa' in df_final_venda_por_estab.columns:
+        df_final_venda_por_estab = df_final_venda_por_estab.groupby(['uf_empresa', 'cnpj'], dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    else:
+        df_final_venda_por_estab = pd.DataFrame(columns=['uf_empresa', 'cnpj', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
 
     # tabela_venda_por_uf_do_estab
-    df_final_venda_por_uf_estab = df_final_venda_por_estab.groupby('uf_empresa', dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    if not df_final_venda_por_estab.empty and 'uf_empresa' in df_final_venda_por_estab.columns:
+        df_final_venda_por_uf_estab = df_final_venda_por_estab.groupby('uf_empresa', dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    else:
+        df_final_venda_por_uf_estab = pd.DataFrame(columns=['uf_empresa', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
 
     # tabela_venda_por_cfop
-    df_C170_venda_por_cfop = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby(['11','cfop_descr'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
-    df_C170_venda_por_cfop = df_C170_venda_por_cfop.rename(columns={
-        '11': 'CFOP',
-        'cfop_descr': 'cfop_descr',
-        '7': 'valor_opr',
-        '26': 'bc',
-        '30': 'vlr_pis',
-        '36': 'vlr_cofins'
-    })
-    df_C175_venda_por_cfop = C175.groupby(['2', 'cfop_descr'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
-    df_C175_venda_por_cfop = df_C175_venda_por_cfop.rename(columns={
-        '2': 'CFOP',
-        'cfop_descr': 'cfop_descr',
-        '3': 'valor_opr',
-        '6': 'bc',
-        '10': 'vlr_pis',
-        '16': 'vlr_cofins'
-    })
-    df_C181_venda_por_cfop = C181.groupby(['3', 'cfop_descr'], dropna=False)[['4']].sum().round(2).sort_values(by='4', ascending=False).reset_index()
+    if not C170.empty and 'cfop_descr' in C170.columns and '11' in C170.columns:
+        df_C170_venda_por_cfop = C170[C170['cfop_descr'].str.lower().fillna('').str.startswith("venda")].groupby(['11','cfop_descr'], dropna=False)[['7', '26', '30', '36']].sum().round(2).sort_values(by='7', ascending=False).reset_index()
+        df_C170_venda_por_cfop = df_C170_venda_por_cfop.rename(columns={
+            '11': 'CFOP',
+            'cfop_descr': 'cfop_descr',
+            '7': 'valor_opr',
+            '26': 'bc',
+            '30': 'vlr_pis',
+            '36': 'vlr_cofins'
+        })
+    else:
+        df_C170_venda_por_cfop = pd.DataFrame(columns=['CFOP', 'cfop_descr', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
+    if not C175.empty and 'cfop_descr' in C175.columns and '2' in C175.columns:
+        df_C175_venda_por_cfop = C175.groupby(['2', 'cfop_descr'], dropna=False)[['3', '6', '10', '16']].sum().round(2).sort_values(by='3', ascending=False).reset_index()
+        df_C175_venda_por_cfop = df_C175_venda_por_cfop.rename(columns={
+            '2': 'CFOP',
+            'cfop_descr': 'cfop_descr',
+            '3': 'valor_opr',
+            '6': 'bc',
+            '10': 'vlr_pis',
+            '16': 'vlr_cofins'
+        })
+    else:
+        df_C175_venda_por_cfop = pd.DataFrame(columns=['CFOP', 'cfop_descr', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
+    if not C181.empty and 'cfop_descr' in C181.columns and '3' in C181.columns:
+        df_C181_venda_por_cfop = C181.groupby(['3', 'cfop_descr'], dropna=False)[['4']].sum().round(2).sort_values(by='4', ascending=False).reset_index()
+    else:
+        df_C181_venda_por_cfop = pd.DataFrame(columns=['3', 'cfop_descr', '4'])
 
 
     df_final_venda_por_cfop = pd.concat([df_C170_venda_por_cfop, df_C175_venda_por_cfop], ignore_index=True)
-    df_final_venda_por_cfop = df_final_venda_por_cfop.groupby(['CFOP', 'cfop_descr'], dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    if not df_final_venda_por_cfop.empty and 'CFOP' in df_final_venda_por_cfop.columns:
+        df_final_venda_por_cfop = df_final_venda_por_cfop.groupby(['CFOP', 'cfop_descr'], dropna=False)[['valor_opr', 'bc', 'vlr_pis', 'vlr_cofins']].sum().round(2).sort_values(by='valor_opr', ascending=False).reset_index()
+    else:
+        df_final_venda_por_cfop = pd.DataFrame(columns=['CFOP', 'cfop_descr', 'valor_opr', 'bc', 'vlr_pis', 'vlr_cofins'])
 
 
 

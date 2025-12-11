@@ -25,27 +25,64 @@ def load_and_process_data(uploaded_file):
 
     for i, f in enumerate(files):
         f.seek(0)
-        reader = pd.read_csv(
-            f,
-            header=None,
-            delimiter=delimiter,
-            names=column_names,
-            encoding=encoding,
-            dtype=str,
-            engine="python",
-            on_bad_lines="skip",
-            chunksize=config.CHUNK_SIZE,
-            quoting=csv.QUOTE_NONE
-        )
-        parts = []
-        for chunk in reader:
-            if '1' in chunk.columns:
-                mask_end = chunk['1'].astype(str).eq('9999')
-                if mask_end.any():
-                    first_idx = int(np.argmax(mask_end.to_numpy()))
-                    parts.append(chunk.iloc[:first_idx+1])
-                    break
-            parts.append(chunk)
+        # Pre-scan file to find |9999| (end of valid SPED data, before digital certificate)
+        # This allows C engine to avoid binary certificate data
+        file_content = f.read()
+        if isinstance(file_content, bytes):
+            file_content = file_content.decode(encoding, errors='ignore')
+
+        # Find the line that starts with |9999| - this marks end of valid data
+        lines = file_content.split('\n')
+        end_idx = None
+        for idx, line in enumerate(lines):
+            if line.startswith('|9999|'):
+                end_idx = idx
+                break
+
+        if end_idx is not None:
+            # Truncate to valid data only (up to and including |9999|)
+            valid_content = '\n'.join(lines[:end_idx+1])
+        else:
+            valid_content = file_content
+
+        # Now read the cleaned content with fast C engine
+        from io import StringIO
+        f_clean = StringIO(valid_content)
+
+        try:
+            reader = pd.read_csv(
+                f_clean,
+                header=None,
+                delimiter=delimiter,
+                names=column_names,
+                encoding=None,  # Already decoded
+                dtype=str,
+                engine="c",
+                on_bad_lines="skip",
+                chunksize=config.CHUNK_SIZE
+            )
+            parts = []
+            for chunk in reader:
+                parts.append(chunk)
+        except (pd.errors.ParserError, ValueError) as e:
+            # Fallback to Python engine if C engine still fails
+            f_clean.seek(0)
+            reader = pd.read_csv(
+                f_clean,
+                header=None,
+                delimiter=delimiter,
+                names=column_names,
+                encoding=None,
+                dtype=str,
+                engine="python",
+                on_bad_lines="skip",
+                chunksize=config.CHUNK_SIZE,
+                quoting=csv.QUOTE_NONE
+            )
+            parts = []
+            for chunk in reader:
+                parts.append(chunk)
+
         df_temp = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=column_names)
         if not df_temp.empty and '1' in df_temp.columns:
             mask_all = df_temp['1'].astype(str).eq('9999')
@@ -65,11 +102,13 @@ def load_and_process_data(uploaded_file):
         if '0' in df_temp.columns:
             df_temp.drop(columns=['0'], inplace=True)
 
+        # Vectorized ID generation with numpy (faster than pandas string ops)
         prefix_file = str(i)
         prefix_periodo = str(data_efd) if data_efd is not None else "NA"
         prefix_cnpj = str(cnpj_header) if cnpj_header is not None else "NA"
-        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
-        composite_id = (prefix_file + "|" + prefix_periodo + "|" + prefix_cnpj + "|" + row_no).astype("string")
+        prefix_combined = f"{prefix_file}|{prefix_periodo}|{prefix_cnpj}|"
+        row_no_array = np.char.zfill(np.arange(len(df_temp)).astype(str), 7)
+        composite_id = np.char.add(prefix_combined, row_no_array)
 
         df_temp.insert(0, 'cnpj', None)
         df_temp.insert(0, 'periodo', data_efd)
@@ -91,6 +130,10 @@ def load_and_process_data(uploaded_file):
         st.error("Falha ao ler o SPED Contribuições: nenhum arquivo válido ou todas as linhas foram descartadas como inválidas.")
         st.stop()
 
+    # Convert register code to categorical for memory efficiency (50 unique values, millions of rows)
+    if '1' in df.columns:
+        df['1'] = df['1'].astype('category')
+
     return df
 
 
@@ -107,32 +150,51 @@ def load_and_process_sped_fiscal(uploaded_files):
 
     dfs = []
     for i, single_file in enumerate(uploaded_files):
+        single_file.seek(0)
+        # Pre-scan file to find |9999| (end of valid SPED data, before digital certificate)
+        file_content = single_file.read()
+        if isinstance(file_content, bytes):
+            file_content = file_content.decode(encoding, errors='ignore')
+
+        # Find the line that starts with |9999| - this marks end of valid data
+        lines = file_content.split('\n')
+        end_idx = None
+        for idx, line in enumerate(lines):
+            if line.startswith('|9999|'):
+                end_idx = idx
+                break
+
+        if end_idx is not None:
+            # Truncate to valid data only (up to and including |9999|)
+            valid_content = '\n'.join(lines[:end_idx+1])
+        else:
+            valid_content = file_content
+
+        # Now read the cleaned content with fast C engine
+        from io import StringIO
+        f_clean = StringIO(valid_content)
+
         try:
-            single_file.seek(0)
             df_temp = pd.read_csv(
-                single_file,
+                f_clean,
                 header=None,
                 delimiter=delimiter,
                 names=column_names,
                 low_memory=False,
-                encoding=encoding,
+                encoding=None,  # Already decoded
                 dtype=str,
                 engine="c",
                 on_bad_lines="skip"
             )
-            if not df_temp.empty and '1' in df_temp.columns:
-                mask_all = df_temp['1'].astype(str).eq('9999')
-                if mask_all.any():
-                    cut = int(np.argmax(mask_all.to_numpy()))
-                    df_temp = df_temp.iloc[:cut+1].copy()
         except pd.errors.ParserError:
-            single_file.seek(0)
+            # Fallback to Python engine if C engine still fails
+            f_clean.seek(0)
             reader = pd.read_csv(
-                single_file,
+                f_clean,
                 header=None,
                 delimiter=delimiter,
                 names=column_names,
-                encoding=encoding,
+                encoding=None,
                 dtype=str,
                 engine="python",
                 on_bad_lines="skip",
@@ -141,12 +203,6 @@ def load_and_process_sped_fiscal(uploaded_files):
             )
             parts = []
             for chunk in reader:
-                if '1' in chunk.columns:
-                    mask_end = chunk['1'].astype(str).eq('9999')
-                    if mask_end.any():
-                        first_idx = int(np.argmax(mask_end.to_numpy()))
-                        parts.append(chunk.iloc[:first_idx+1])
-                        break
                 parts.append(chunk)
             df_temp = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=column_names)
         if df_temp.empty:
@@ -164,11 +220,13 @@ def load_and_process_sped_fiscal(uploaded_files):
         if '0' in df_temp.columns:
             df_temp.drop(columns=['0'], inplace=True)
 
+        # Vectorized ID generation with numpy (faster than pandas string ops)
         prefix_file = str(i)
         prefix_periodo = str(data_efd) if data_efd is not None else "NA"
         prefix_cnpj = str(cnpj_estab) if cnpj_estab is not None else "NA"
-        row_no = pd.Series(df_temp.index, index=df_temp.index).astype(str).str.zfill(7)
-        composite_id = (prefix_file + "|" + prefix_periodo + "|" + prefix_cnpj + "|" + row_no).astype("string")
+        prefix_combined = f"{prefix_file}|{prefix_periodo}|{prefix_cnpj}|"
+        row_no_array = np.char.zfill(np.arange(len(df_temp)).astype(str), 7)
+        composite_id = np.char.add(prefix_combined, row_no_array)
 
         df_temp.insert(0, 'uf_estab', uf_estab)
         df_temp.insert(0, 'ie_estab', ie_estab)
@@ -187,6 +245,10 @@ def load_and_process_sped_fiscal(uploaded_files):
     if "id" in df_sped_fiscal.columns:
         df_sped_fiscal = df_sped_fiscal.drop_duplicates(subset=["id"], keep="last")
 
+    # Convert register code to categorical for memory efficiency (50 unique values, millions of rows)
+    if '1' in df_sped_fiscal.columns:
+        df_sped_fiscal['1'] = df_sped_fiscal['1'].astype('category')
+
     return df_sped_fiscal
 
 
@@ -196,14 +258,37 @@ def _process_single_ecd_file(uploaded_file, file_index):
     column_names = [str(i) for i in range(config.COLUMN_COUNT_ECD)]
     parent_reg_codes = config.PARENT_REG_ECD
 
+    # Pre-scan file to find |9999| (end of valid ECD data, before digital certificate)
+    uploaded_file.seek(0)
+    file_content = uploaded_file.read()
+    if isinstance(file_content, bytes):
+        file_content = file_content.decode(encoding, errors='ignore')
+
+    # Find the line that starts with |9999| - this marks end of valid data
+    lines = file_content.split('\n')
+    end_idx = None
+    for idx, line in enumerate(lines):
+        if line.startswith('|9999|'):
+            end_idx = idx
+            break
+
+    if end_idx is not None:
+        # Truncate to valid data only (up to and including |9999|)
+        valid_content = '\n'.join(lines[:end_idx+1])
+    else:
+        valid_content = file_content
+
+    # Now read the cleaned content with fast C engine
+    from io import StringIO
+    f_clean = StringIO(valid_content)
+
     try:
-        uploaded_file.seek(0)
         reader = pd.read_csv(
-            uploaded_file,
+            f_clean,
             header=None,
             delimiter=delimiter,
             names=column_names,
-            encoding=encoding,
+            encoding=None,  # Already decoded
             dtype=str,
             engine="c",
             on_bad_lines="skip",
@@ -211,13 +296,13 @@ def _process_single_ecd_file(uploaded_file, file_index):
         )
     except (pd.errors.ParserError, UnicodeDecodeError, csv.Error) as e:
         # Fallback to Python engine if C engine fails
-        uploaded_file.seek(0)
+        f_clean.seek(0)
         reader = pd.read_csv(
-            uploaded_file,
+            f_clean,
             header=None,
             delimiter=delimiter,
             names=column_names,
-            encoding=encoding,
+            encoding=None,
             dtype=str,
             engine="python",
             on_bad_lines="skip",
@@ -341,13 +426,14 @@ def _process_single_ecd_file(uploaded_file, file_index):
     if '0' in df.columns:
         df.drop(columns=['0'], inplace=True)
 
-    # Build deterministic, cross-file row id
+    # Build deterministic, cross-file row id (vectorized with numpy for speed)
     # id := "<fileidx>|<ano>|<cnpj>|<row_no_zfilled>"
     prefix_file = str(file_index)
     prefix_ano = str(ano_ecd) if ano_ecd is not None else "NA"
     prefix_cnpj = str(cnpj) if cnpj is not None else "NA"
-    row_no = pd.Series(df.index, index=df.index).astype(str).str.zfill(7)
-    composite_id = (prefix_file + "|" + prefix_ano + "|" + prefix_cnpj + "|" + row_no).astype("string")
+    prefix_combined = f"{prefix_file}|{prefix_ano}|{prefix_cnpj}|"
+    row_no_array = np.char.zfill(np.arange(len(df)).astype(str), 7)
+    composite_id = np.char.add(prefix_combined, row_no_array)
 
     df.insert(0, 'cnpj', cnpj)
     df.insert(0, 'ano', ano_ecd)
@@ -386,4 +472,9 @@ def load_and_process_ecd(uploaded_files):
         st.stop()
 
     df_ecd = pd.concat(dfs, ignore_index=True)
+
+    # Convert register code to categorical for memory efficiency (50 unique values, millions of rows)
+    if '1' in df_ecd.columns:
+        df_ecd['1'] = df_ecd['1'].astype('category')
+
     return df_ecd

@@ -410,9 +410,15 @@ def Bloco_I_ECD(df, PLANO_CONTAS_REF):
 
     REG_I155_ECD.insert(4, 'periodo_inicio', REG_I155_ECD['id_pai'].map(REG_I150_ECD.set_index('id')['2']))       # incluido periodo_inicio
     REG_I155_ECD.insert(5, 'periodo_final', REG_I155_ECD['id_pai'].map(REG_I150_ECD.set_index('id')['3']))       # incluido periodo_final
-    REG_I155_ECD.insert(8, 'CTA_DESCR', REG_I155_ECD['2'].map(REG_I050_ECD.set_index('6')['8']))       # incluido a descrição da conta contabil
-    REG_I155_ECD.insert(9, 'CTA_REF', REG_I155_ECD['2'].map(REG_I050_ECD.set_index('6')['CTA_REF']))       # incluido COD_CTA_REF
-    REG_I155_ECD.insert(10, 'CTA_REF_DESCR', REG_I155_ECD['2'].map(REG_I050_ECD.set_index('6')['CTA_REF_DESCR']))       # incluido descrição da COD_CTA_REF
+
+    # For multiple monthly ECD files: deduplicate I050 by COD_CTA (column '6') before mapping
+    # Chart of Accounts should be consistent across periods, so we keep the first occurrence
+    REG_I050_unique = REG_I050_ECD.drop_duplicates(subset=['6'], keep='first')
+    REG_I050_mapping = REG_I050_unique.set_index('6')
+
+    REG_I155_ECD.insert(8, 'CTA_DESCR', REG_I155_ECD['2'].map(REG_I050_mapping['8']))       # incluido a descrição da conta contabil
+    REG_I155_ECD.insert(9, 'CTA_REF', REG_I155_ECD['2'].map(REG_I050_mapping['CTA_REF']))       # incluido COD_CTA_REF
+    REG_I155_ECD.insert(10, 'CTA_REF_DESCR', REG_I155_ECD['2'].map(REG_I050_mapping['CTA_REF_DESCR']))       # incluido descrição da COD_CTA_REF
     REG_I155_ECD = REG_I155_ECD.rename(columns={
         '1': 'REG',
         '2': 'COD_CTA',
@@ -431,10 +437,9 @@ def Bloco_I_ECD(df, PLANO_CONTAS_REF):
                     .replace(',', '.', regex=True))
     REG_I355_ECD[['4']] = REG_I355_ECD[['4']].apply(pd.to_numeric, errors='coerce')
     REG_I355_ECD.insert(5, 'periodo_final', REG_I355_ECD['id_pai'].map(REG_I350_ECD.set_index('id')['2']))       # incluido periodo_final
-    REG_I355_ECD.insert(7, 'CTA_DESCR', REG_I355_ECD['2'].map(REG_I050_ECD.set_index('6')['8']))       # incluido a descrição da conta contabil
-
-    REG_I355_ECD.insert(8, 'CTA_REF', REG_I355_ECD['2'].map(REG_I050_ECD.set_index('6')['CTA_REF']))       # incluido COD_CTA_REF
-    REG_I355_ECD.insert(9, 'CTA_REF_DESCR', REG_I355_ECD['2'].map(REG_I050_ECD.set_index('6')['CTA_REF_DESCR']))       # incluido descrição da COD_CTA_REF
+    REG_I355_ECD.insert(7, 'CTA_DESCR', REG_I355_ECD['2'].map(REG_I050_mapping['8']))       # incluido a descrição da conta contabil
+    REG_I355_ECD.insert(8, 'CTA_REF', REG_I355_ECD['2'].map(REG_I050_mapping['CTA_REF']))       # incluido COD_CTA_REF
+    REG_I355_ECD.insert(9, 'CTA_REF_DESCR', REG_I355_ECD['2'].map(REG_I050_mapping['CTA_REF_DESCR']))       # incluido descrição da COD_CTA_REF
     REG_I355_ECD = REG_I355_ECD.rename(columns={
         '1': 'REG',
         '2': 'COD_CTA',

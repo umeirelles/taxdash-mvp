@@ -1038,7 +1038,28 @@ elif selected_area == "Área 5: Reforma Tributária":
 
     # -------------------------------------------------------------------
     st.subheader("> Base Completa de Saídas")
-    st.dataframe(df_saidas_reforma, hide_index=True, use_container_width=False)
+    total_rows = len(df_saidas_reforma)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write(f"Total de registros: {total_rows:,}")
+    with col2:
+        # Download button for complete data (Brazilian CSV format: semicolon separator, comma decimal)
+        csv_saidas = df_saidas_reforma.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+        st.download_button(
+            label="📥 Baixar tabela completa (CSV)",
+            data=csv_saidas,
+            file_name="base_completa_saidas.csv",
+            mime="text/csv",
+        )
+
+    # Display only first 10,000 rows to avoid MessageSizeError
+    max_display = 10000
+    if total_rows > max_display:
+        st.warning(f"⚠️ Exibindo apenas as primeiras {max_display:,} linhas de {total_rows:,} registros para evitar sobrecarga. Use o botão acima para baixar todos os dados.")
+        st.dataframe(df_saidas_reforma.head(max_display), hide_index=True, use_container_width=False)
+    else:
+        st.dataframe(df_saidas_reforma, hide_index=True, use_container_width=False)
     
     st.divider()
 
@@ -1280,7 +1301,28 @@ elif selected_area == "Área 5: Reforma Tributária":
     # -------------------------------------------------------------------
     st.subheader("**2.1) Base de Entradas C170 Sped Fiscal (apenas CFOP de compra)**")
     df_C170_SF_compras = C170_SF[C170_SF['cfop_descr'].str.lower().fillna('').str.startswith("compra")]
-    st.dataframe(df_C170_SF_compras, hide_index=True, use_container_width=False)
+    total_rows_compras = len(df_C170_SF_compras)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write(f"Total de registros: {total_rows_compras:,}")
+    with col2:
+        # Download button for complete data (Brazilian CSV format: semicolon separator, comma decimal)
+        csv_compras = df_C170_SF_compras.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+        st.download_button(
+            label="📥 Baixar tabela completa (CSV)",
+            data=csv_compras,
+            file_name="base_completa_compras.csv",
+            mime="text/csv",
+        )
+
+    # Display only first 10,000 rows to avoid MessageSizeError
+    max_display = 10000
+    if total_rows_compras > max_display:
+        st.warning(f"⚠️ Exibindo apenas as primeiras {max_display:,} linhas de {total_rows_compras:,} registros para evitar sobrecarga. Use o botão acima para baixar todos os dados.")
+        st.dataframe(df_C170_SF_compras.head(max_display), hide_index=True, use_container_width=False)
+    else:
+        st.dataframe(df_C170_SF_compras, hide_index=True, use_container_width=False)
 
     # -------------------------------------------------------------------
     st.subheader("**2.2) Compras (NCMxCFOPxCSTxALIQ)**")

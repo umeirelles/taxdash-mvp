@@ -1453,6 +1453,10 @@ elif selected_area == "Área 5: Reforma Tributária":
     st.write("**Crédito CBS (calculado automaticamente):**", f"{tot_cbs:,.2f}")
     st.write("**Crédito IBS (calculado automaticamente):**", f"{tot_ibs:,.2f}")
 
+    # Download button for the edited table
+    csv_ecd = convert_df_to_csv(edited_ecd.reset_index(drop=True))
+    st.download_button("📥 Baixar CSV", csv_ecd, "ecd_i355_plano_referencial.csv", "text/csv")
+
 
 
 

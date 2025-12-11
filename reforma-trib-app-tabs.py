@@ -509,7 +509,26 @@ if selected_area == "Área 1: Importar Arquivos SPED":
 
         st.markdown('###')
 
-        if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True):
+        # Check if minimum required files are uploaded
+        has_contrib = len(st.session_state.file_registry['contrib']) > 0
+        has_fiscal = len(st.session_state.file_registry['fiscal']) > 0
+        can_process = has_contrib and has_fiscal
+
+        # Show what's missing
+        if not can_process:
+            missing = []
+            if not has_contrib:
+                missing.append("SPED Contribuições")
+            if not has_fiscal:
+                missing.append("SPED Fiscal")
+            st.info(f"ℹ️ Para processar, adicione pelo menos: {', '.join(missing)}")
+
+        if st.button("🚀 Processar Arquivos", type='primary', use_container_width=True, disabled=not can_process):
+
+            # Get files from registry
+            ecd_files = get_files_for_processing('ecd')
+            contrib_files = get_files_for_processing('contrib')
+            fiscal_files = get_files_for_processing('fiscal')
 
             # -----------------------------------------------------
             # Visual feedback: list selected files + stage progress
@@ -526,25 +545,6 @@ if selected_area == "Área 1: Importar Arquivos SPED":
                 ph_contrib_prog = st.progress(0, text="Aguardando importação do SPED Contribuições…")
                 ph_ecd_msg = st.empty()
                 ph_ecd_prog = st.progress(0, text="Aguardando importação da ECD…")
-            
-
-            # Get files from registry
-            ecd_files = get_files_for_processing('ecd')
-            contrib_files = get_files_for_processing('contrib')
-            fiscal_files = get_files_for_processing('fiscal')
-
-            # Validation
-            if not contrib_files and not fiscal_files:
-                st.warning("É necessário adicionar ao menos 1 arquivo SPED acima.")
-                st.stop()
-
-            if not contrib_files:
-                st.warning("É necessário adicionar ao menos 1 arquivo SPED Contribuições.")
-                st.stop()
-
-            if not fiscal_files:
-                st.warning("É necessário adicionar ao menos 1 arquivo SPED Fiscal.")
-                st.stop()
 
 
             #-----------------------------------------------------
